@@ -23,7 +23,7 @@
     <parent>
         <artifactId>tubemq</artifactId>
         <groupId>com.tencent.tubemq</groupId>
-        <version>3.8.0</version>
+        <version>0.2-SNAPSHOT</version>
     </parent>
     <artifactId>tubemq-server</artifactId>
     <name>tubemq-server</name>
@@ -39,6 +39,8 @@
                     <source>1.8</source>
                     <target>1.8</target>
                     <encoding>UTF-8</encoding>
+                    <showDeprecation>true</showDeprecation>
+                    <showWarnings>true</showWarnings>
                 </configuration>
             </plugin>
             <plugin>
@@ -58,6 +60,43 @@
                         <goals>
                             <goal>single</goal>
                         </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>version</id>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>${executable.file}</executable>
+                            <arguments>
+                                <argument>${project.version}</argument>
+                                <argument>${generated.sources.directory}</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>build-helper-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>generate-sources</phase>
+                        <goals>
+                            <goal>add-source</goal>
+                        </goals>
+                        <configuration>
+                            <sources>
+                                <source>${project.build.directory}/generated-sources/java</source>
+                            </sources>
+                        </configuration>
                     </execution>
                 </executions>
             </plugin>
@@ -100,10 +139,6 @@
         <dependency>
             <groupId>org.apache.velocity</groupId>
             <artifactId>velocity</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.codehaus.jackson</groupId>
-            <artifactId>jackson-mapper-asl</artifactId>
         </dependency>
         <dependency>
             <groupId>org.mortbay.jetty</groupId>
@@ -158,5 +193,32 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>os.unix</id>
+            <activation>
+                <os>
+                    <family>!windows</family>
+                </os>
+            </activation>
+            <properties>
+                <executable.file>${basedir}/src/saveServerVersion.sh</executable.file>
+                <generated.sources.directory>${project.build.directory}/generated-sources/java</generated.sources.directory>
+            </properties>
+        </profile>
+        <profile>
+            <id>os.windows</id>
+            <activation>
+                <os>
+                    <family>windows</family>
+                </os>
+            </activation>
+            <properties>
+                <executable.file>${basedir}\src\saveServerVersion.cmd</executable.file>
+                <generated.sources.directory>${project.build.directory}\generated-sources\java</generated.sources.directory>
+            </properties>
+        </profile>
+    </profiles>
 
 </project>

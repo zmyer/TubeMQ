@@ -26,11 +26,15 @@ import com.tencent.tubemq.server.common.utils.WebParameterUtils;
 import com.tencent.tubemq.server.master.TMaster;
 import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbGroupFlowCtrlEntity;
 import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerConfManage;
+import java.util.Arrays;
+import java.util.Date;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.servlet.http.HttpServletRequest;
-import java.util.*;
 
 
 public class WebAdminFlowRuleHandler {
@@ -39,6 +43,7 @@ public class WebAdminFlowRuleHandler {
             LoggerFactory.getLogger(WebAdminFlowRuleHandler.class);
     private TMaster master;
     private BrokerConfManage brokerConfManage;
+    private static final List<Integer> allowedPriorityVal = Arrays.asList(1, 2, 3);
 
     public WebAdminFlowRuleHandler(TMaster master) {
         this.master = master;
@@ -77,25 +82,8 @@ public class WebAdminFlowRuleHandler {
             // get and valid priority info
             int qryPriorityId =
                     WebParameterUtils.validIntDataParameter("qryPriorityId",
-                            req.getParameter("qryPriorityId"), false, 0, 0);
-            if (qryPriorityId > 303) {
-                throw new Exception(
-                        "Illegal value in qryPriorityId parameter: qryPriorityId must <= 303!");
-            }
-            if (qryPriorityId > 3
-                    && qryPriorityId < 100) {
-                throw new Exception("Illegal value in qryPriorityId parameter:"
-                        + " the value of qryPriorityId must like 1,2,3 or 101,102");
-            }
-            List<Integer> allowedVal = Arrays.asList(0, 1, 2, 3);
-            if (!allowedVal.contains(qryPriorityId % 100)) {
-                throw new Exception("Illegal value in qryPriorityId parameter:"
-                        + " the units of qryPriorityId must in [0,1,2,3]!");
-            }
-            if (!allowedVal.contains(qryPriorityId / 100)) {
-                throw new Exception("Illegal value in qryPriorityId parameter:"
-                        + " the hundreds of qryPriorityId must in [0,1,2,3]!");
-            }
+                            req.getParameter("qryPriorityId"), false, 301, 101);
+            checkQryPriorityId(qryPriorityId);
             // get if enable ssd process function
             boolean curNeedSSDProc =
                     WebParameterUtils.validBooleanDataParameter("needSSDProc",
@@ -252,18 +240,10 @@ public class WebAdminFlowRuleHandler {
                     int qryPriorityId =
                             WebParameterUtils.validIntDataParameter("qryPriorityId",
                                     req.getParameter("qryPriorityId"),
-                                    false, TBaseConstants.META_VALUE_UNDEFINED, 0);
+                                    false, TBaseConstants.META_VALUE_UNDEFINED, 101);
                     if (qryPriorityId != TBaseConstants.META_VALUE_UNDEFINED
                             && qryPriorityId != oldEntity.getQryPriorityId()) {
-                        List<Integer> allowedVal = Arrays.asList(0, 1, 2, 3);
-                        if (qryPriorityId > 303
-                                || (qryPriorityId > 3 && qryPriorityId < 100)
-                                || (!allowedVal.contains(qryPriorityId % 100))
-                                || (!allowedVal.contains(qryPriorityId / 100))) {
-                            throw new Exception("Illegal value in qryPriorityId parameter:"
-                                    + " the units of qryPriorityId must in [0,1,2,3],"
-                                    + " the value of qryPriorityId must like 1,2,3 or 101,102!");
-                        }
+                        checkQryPriorityId(qryPriorityId);
                         foundChange = true;
                         newGroupFlowCtrlEntity.setQryPriorityId(qryPriorityId);
                     }
@@ -388,7 +368,7 @@ public class WebAdminFlowRuleHandler {
             List<Integer> ruleTypes = Arrays.asList(0, 1, 2, 3);
             inFlowCtrlInfo = String.valueOf(inFlowCtrlInfo).trim();
             FlowCtrlRuleHandler flowCtrlRuleHandler =
-                    new FlowCtrlRuleHandler();
+                new FlowCtrlRuleHandler(true);
             Map<Integer, List<FlowCtrlItem>> flowCtrlItemMap =
                     flowCtrlRuleHandler.parseFlowCtrlInfo(inFlowCtrlInfo);
             for (Integer typeId : ruleTypes) {
@@ -419,6 +399,22 @@ public class WebAdminFlowRuleHandler {
         }
         strBuffer.append("]");
         return ruleCnt;
+    }
+
+    private void checkQryPriorityId(int qryPriorityId) throws Exception {
+        if (qryPriorityId > 303 || qryPriorityId < 101) {
+            throw new Exception(
+                    "Illegal value in qryPriorityId parameter: qryPriorityId value"
+                            + " must be greater than or equal to 101 and less than or equal to 303!");
+        }
+        if (!allowedPriorityVal.contains(qryPriorityId % 100)) {
+            throw new Exception("Illegal value in qryPriorityId parameter:"
+                    + " the units of qryPriorityId must in [1,2,3]!");
+        }
+        if (!allowedPriorityVal.contains(qryPriorityId / 100)) {
+            throw new Exception("Illegal value in qryPriorityId parameter:"
+                    + " the hundreds of qryPriorityId must in [1,2,3]!");
+        }
     }
 
 }

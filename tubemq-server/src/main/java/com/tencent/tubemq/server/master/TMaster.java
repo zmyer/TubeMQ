@@ -23,9 +23,35 @@ import com.tencent.tubemq.corebase.TokenConstants;
 import com.tencent.tubemq.corebase.balance.ConsumerEvent;
 import com.tencent.tubemq.corebase.balance.EventStatus;
 import com.tencent.tubemq.corebase.balance.EventType;
-import com.tencent.tubemq.corebase.cluster.*;
+import com.tencent.tubemq.corebase.cluster.BrokerInfo;
+import com.tencent.tubemq.corebase.cluster.ConsumerInfo;
+import com.tencent.tubemq.corebase.cluster.NodeAddrInfo;
+import com.tencent.tubemq.corebase.cluster.Partition;
+import com.tencent.tubemq.corebase.cluster.ProducerInfo;
+import com.tencent.tubemq.corebase.cluster.SubscribeInfo;
+import com.tencent.tubemq.corebase.cluster.TopicInfo;
 import com.tencent.tubemq.corebase.config.TLSConfig;
-import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.*;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.CloseRequestB2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.CloseRequestC2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.CloseRequestP2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.CloseResponseM2B;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.CloseResponseM2C;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.CloseResponseM2P;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.EnableBrokerFunInfo;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.EventProto;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.HeartRequestB2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.HeartRequestC2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.HeartRequestP2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.HeartResponseM2B;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.HeartResponseM2C;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.HeartResponseM2P;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.MasterAuthorizedInfo;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.RegisterRequestB2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.RegisterRequestC2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.RegisterRequestP2M;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.RegisterResponseM2B;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.RegisterResponseM2C;
+import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster.RegisterResponseM2P;
 import com.tencent.tubemq.corebase.utils.ConcurrentHashSet;
 import com.tencent.tubemq.corebase.utils.DataConverterUtil;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
@@ -57,7 +83,11 @@ import com.tencent.tubemq.server.master.balance.LoadBalancer;
 import com.tencent.tubemq.server.master.bdbstore.DefaultBdbStoreService;
 import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbBrokerConfEntity;
 import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbGroupFlowCtrlEntity;
-import com.tencent.tubemq.server.master.nodemanage.nodebroker.*;
+import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerConfManage;
+import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerInfoHolder;
+import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerSyncStatusInfo;
+import com.tencent.tubemq.server.master.nodemanage.nodebroker.TargetValidResult;
+import com.tencent.tubemq.server.master.nodemanage.nodebroker.TopicPSInfoManager;
 import com.tencent.tubemq.server.master.nodemanage.nodeconsumer.ConsumerBandInfo;
 import com.tencent.tubemq.server.master.nodemanage.nodeconsumer.ConsumerEventManager;
 import com.tencent.tubemq.server.master.nodemanage.nodeconsumer.ConsumerInfoHolder;
@@ -65,22 +95,28 @@ import com.tencent.tubemq.server.master.nodemanage.nodeproducer.ProducerInfoHold
 import com.tencent.tubemq.server.master.utils.Chore;
 import com.tencent.tubemq.server.master.utils.SimpleVisitTokenManage;
 import com.tencent.tubemq.server.master.web.WebServer;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import org.apache.commons.codec.binary.StringUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.File;
-import java.io.IOException;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
-
 
 public class TMaster extends HasThread implements MasterService, Stoppable {
 
     private static final Logger logger = LoggerFactory.getLogger(TMaster.class);
+    private static final int MAX_BALANCE_DELAY_TIME = 10;
 
     private final ConcurrentHashMap<String/* consumerId */, Map<String/* topic */, Map<String, Partition>>>
             currentSubInfo = new ConcurrentHashMap<String, Map<String, Map<String, Partition>>>();
@@ -111,7 +147,6 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
     private boolean startupBalance = true;
     private boolean startupResetBalance = true;
     private int balanceDelayTimes = 0;
-    private int MAX_BALANCE_DELAY_TIME = 10;
     private Sleeper stopSleeper = new Sleeper(1000, this);
     private SimpleVisitTokenManage visitTokenManage;
 
@@ -256,7 +291,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         builder.setSuccess(false);
         builder.setBrokerCheckSum(-1);
         CertifiedResult certResult =
-                serverAuthHandler.identityValidUserInfo(request.getAuthInfo());
+                serverAuthHandler.identityValidUserInfo(request.getAuthInfo(), true);
         if (!certResult.result) {
             builder.setErrCode(certResult.errCode);
             builder.setErrMsg(certResult.errInfo);
@@ -304,7 +339,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
                 new HashSet<String>(transTopicSet), hostName, overtls);
         builder.setBrokerCheckSum(this.defaultBrokerConfManage.getBrokerInfoCheckSum());
         builder.addAllBrokerInfos(this.defaultBrokerConfManage.getBrokersMap(overtls).values());
-        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken).build());
+        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken, false).build());
         logger.info(strBuffer.append("[Producer Register] ")
                 .append(producerId).append(", isOverTLS=").append(overtls).toString());
         builder.setSuccess(true);
@@ -331,7 +366,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         builder.setSuccess(false);
         builder.setBrokerCheckSum(-1);
         CertifiedResult certResult =
-                serverAuthHandler.identityValidUserInfo(request.getAuthInfo());
+                serverAuthHandler.identityValidUserInfo(request.getAuthInfo(), true);
         if (!certResult.result) {
             builder.setErrCode(certResult.errCode);
             builder.setErrMsg(certResult.errInfo);
@@ -388,7 +423,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         Map<String, String> availTopicPartitions = getProducerTopicPartitionInfo(producerId);
         builder.addAllTopicInfos(availTopicPartitions.values());
         builder.setBrokerCheckSum(defaultBrokerConfManage.getBrokerInfoCheckSum());
-        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken).build());
+        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken, false).build());
         if (defaultBrokerConfManage.getBrokerInfoCheckSum() != inBrokerCheckSum) {
             builder.addAllBrokerInfos(defaultBrokerConfManage.getBrokersMap(overtls).values());
         }
@@ -420,7 +455,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         CloseResponseM2P.Builder builder = CloseResponseM2P.newBuilder();
         builder.setSuccess(false);
         CertifiedResult certResult =
-                serverAuthHandler.identityValidUserInfo(request.getAuthInfo());
+                serverAuthHandler.identityValidUserInfo(request.getAuthInfo(), true);
         if (!certResult.result) {
             builder.setErrCode(certResult.errCode);
             builder.setErrMsg(certResult.errInfo);
@@ -463,7 +498,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         RegisterResponseM2C.Builder builder = RegisterResponseM2C.newBuilder();
         builder.setSuccess(false);
         CertifiedResult certResult =
-                serverAuthHandler.identityValidUserInfo(request.getAuthInfo());
+                serverAuthHandler.identityValidUserInfo(request.getAuthInfo(), false);
         if (!certResult.result) {
             builder.setErrCode(certResult.errCode);
             builder.setErrMsg(certResult.errInfo);
@@ -649,7 +684,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
                 }
             }
         }
-        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken).build());
+        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken, false).build());
         builder.setNotAllocated(consumerHolder.isNotAllocated(groupName));
         builder.setSuccess(true);
         builder.setErrCode(TErrCodeConstants.SUCCESS);
@@ -677,7 +712,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         builder.setSuccess(false);
         // identity valid
         CertifiedResult certResult =
-                serverAuthHandler.identityValidUserInfo(request.getAuthInfo());
+                serverAuthHandler.identityValidUserInfo(request.getAuthInfo(), false);
         if (!certResult.result) {
             builder.setErrCode(certResult.errCode);
             builder.setErrMsg(certResult.errInfo);
@@ -831,7 +866,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
                 }
             }
         }
-        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken).build());
+        builder.setAuthorizedInfo(genAuthorizedInfo(certResult.authorizedToken, false).build());
         builder.setNotAllocated(consumerHolder.isNotAllocated(groupName));
         builder.setSuccess(true);
         builder.setErrCode(TErrCodeConstants.SUCCESS);
@@ -856,7 +891,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         CloseResponseM2C.Builder builder = CloseResponseM2C.newBuilder();
         builder.setSuccess(false);
         CertifiedResult certResult =
-                serverAuthHandler.identityValidUserInfo(request.getAuthInfo());
+                serverAuthHandler.identityValidUserInfo(request.getAuthInfo(), false);
         if (!certResult.result) {
             builder.setErrCode(certResult.errCode);
             builder.setErrMsg(certResult.errInfo);
@@ -1023,7 +1058,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         builder.setSuccess(true);
         builder.setErrCode(TErrCodeConstants.SUCCESS);
         builder.setErrMsg("OK!");
-        MasterAuthorizedInfo.Builder authorizedBuilder = genAuthorizedInfo(null);
+        MasterAuthorizedInfo.Builder authorizedBuilder = genAuthorizedInfo(null, true);
         builder.setAuthorizedInfo(authorizedBuilder.build());
         EnableBrokerFunInfo.Builder enableInfo = EnableBrokerFunInfo.newBuilder();
         enableInfo.setEnableProduceAuthenticate(masterConfig.isStartProduceAuthenticate());
@@ -1185,19 +1220,20 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
         int reqQureyPriorityId = request.hasQryPriorityId()
                 ? request.getQryPriorityId() : TBaseConstants.META_VALUE_UNDEFINED;
         if (request.getTakeConfInfo()) {
-            strBuffer.append("[Broker Report] heartbeat report: broker configure id : ")
-                    .append(request.getCurBrokerConfId())
-                    .append(", checksum id  is ").append(request.getConfCheckSumId())
-                    .append(", hasFlowCheckId=").append(request.hasFlowCheckId())
-                    .append(",reFlowCtrlId=").append(reFlowCtrlId)
-                    .append(", reqSsdTransId=").append(reqSsdTransId)
-                    .append(", reqQureyPriorityId=").append(reqQureyPriorityId)
-                    .append(", default broker configure is ").append(request.getBrokerDefaultConfInfo())
-                    .append(", broker topic configure is ").append(request.getBrokerTopicSetConfInfoList())
-                    .append(", broker is Online : ").append(request.getBrokerOnline())
-                    .append(", readStatusRpt=").append(request.getReadStatusRpt())
-                    .append(", writeStatusRpt=").append(request.getWriteStatusRpt())
-                    .append(", current brokerSyncStatusInfo is ");
+            strBuffer.append("[Broker Report] heartbeat report: brokerId=")
+                .append(request.getBrokerId()).append(", configureId=")
+                .append(request.getCurBrokerConfId())
+                .append(", checksumId=").append(request.getConfCheckSumId())
+                .append(", hasFlowCheckId=").append(request.hasFlowCheckId())
+                .append(",reFlowCtrlId=").append(reFlowCtrlId)
+                .append(", reqSsdTransId=").append(reqSsdTransId)
+                .append(", reqQureyPriorityId=").append(reqQureyPriorityId)
+                .append(", default broker configure is ").append(request.getBrokerDefaultConfInfo())
+                .append(", broker topic configure is ").append(request.getBrokerTopicSetConfInfoList())
+                .append(", broker is Online : ").append(request.getBrokerOnline())
+                .append(", readStatusRpt=").append(request.getReadStatusRpt())
+                .append(", writeStatusRpt=").append(request.getWriteStatusRpt())
+                .append(", current brokerSyncStatusInfo is ");
             logger.info(brokerSyncStatusInfo.toJsonString(strBuffer, true).toString());
             strBuffer.delete(0, strBuffer.length());
         }
@@ -1257,7 +1293,7 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
                     .append(brokerSyncStatusInfo.getLastPushBrokerTopicSetConfInfo())
                     .toString());
         }
-        MasterAuthorizedInfo.Builder authorizedBuilder = genAuthorizedInfo(null);
+        MasterAuthorizedInfo.Builder authorizedBuilder = genAuthorizedInfo(null, true);
         builder.setAuthorizedInfo(authorizedBuilder.build());
         builder.setSuccess(true);
         builder.setErrCode(TErrCodeConstants.SUCCESS);
@@ -2124,9 +2160,13 @@ public class TMaster extends HasThread implements MasterService, Stoppable {
      * @param authAuthorizedToken
      * @return
      */
-    private MasterAuthorizedInfo.Builder genAuthorizedInfo(String authAuthorizedToken) {
+    private MasterAuthorizedInfo.Builder genAuthorizedInfo(String authAuthorizedToken, boolean isBroker) {
         MasterAuthorizedInfo.Builder authorizedBuilder = MasterAuthorizedInfo.newBuilder();
-        authorizedBuilder.setVisitAuthorizedToken(visitTokenManage.getCurVisitToken());
+        if (isBroker) {
+            authorizedBuilder.setVisitAuthorizedToken(visitTokenManage.getFreshVisitToken());
+        } else {
+            authorizedBuilder.setVisitAuthorizedToken(visitTokenManage.getCurVisitToken());
+        }
         if (TStringUtils.isNotBlank(authAuthorizedToken)) {
             authorizedBuilder.setAuthAuthorizedToken(authAuthorizedToken);
         }

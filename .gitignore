@@ -4,6 +4,8 @@ target/
 /.metadata/
 *.class
 .*
+!.github/
 !.gitignore
 !.gitkeep
+!.travis.yml
 tube-server/test/

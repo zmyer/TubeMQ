@@ -22,18 +22,18 @@
 
 package com.tencent.tubemq.corebase.utils;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.lang.Thread.UncaughtExceptionHandler;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
  * Thread Utility
+ * Copied from <a href="http://hbase.apache.org">Apache HBase Project</a>
  */
 public class ThreadUtils {
-    protected static final Logger logger = LoggerFactory.getLogger(ThreadUtils.class);
+    private static final Logger logger = LoggerFactory.getLogger(ThreadUtils.class);
     private static final AtomicInteger poolNumber = new AtomicInteger(1);
 
     /**
@@ -127,7 +127,7 @@ public class ThreadUtils {
         try {
             Thread.sleep(millis);
         } catch (InterruptedException e) {
-            e.printStackTrace();
+            //e.printStackTrace();
         }
     }
 }

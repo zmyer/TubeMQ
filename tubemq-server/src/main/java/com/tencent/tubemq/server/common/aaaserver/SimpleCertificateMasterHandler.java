@@ -21,7 +21,6 @@ import com.tencent.tubemq.corebase.TErrCodeConstants;
 import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
 import com.tencent.tubemq.server.master.MasterConfig;
-
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -90,14 +89,22 @@ public class SimpleCertificateMasterHandler implements CertificateMasterHandler 
     }
 
     @Override
-    public CertifiedResult identityValidUserInfo(final ClientMaster.MasterCertificateInfo certificateInfo) {
+    public CertifiedResult identityValidUserInfo(final ClientMaster.MasterCertificateInfo certificateInfo,
+                                                 boolean isProduce) {
         String inUserName = "";
         String authorizedToken = "";
         String othParams = "";
         CertifiedResult result = new CertifiedResult();
-        if (!masterConfig.isStartProduceAuthenticate()) {
-            result.setSuccessResult(inUserName, authorizedToken);
-            return result;
+        if (isProduce) {
+            if (!masterConfig.isStartProduceAuthenticate()) {
+                result.setSuccessResult(inUserName, authorizedToken);
+                return result;
+            }
+        } else {
+            if (!masterConfig.isStartConsumeAuthenticate()) {
+                result.setSuccessResult(inUserName, authorizedToken);
+                return result;
+            }
         }
         if (certificateInfo == null) {
             result.setFailureResult(TErrCodeConstants.CERTIFICATE_FAILURE,

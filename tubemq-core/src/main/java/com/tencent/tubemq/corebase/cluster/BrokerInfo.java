@@ -20,13 +20,12 @@ package com.tencent.tubemq.corebase.cluster;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.TokenConstants;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
-
 import java.io.Serializable;
 import java.net.URI;
 import java.net.URISyntaxException;
 
 /**
- * The BrokerInfo hold basic info of an tube broker the borkerId, the borker host
+ * The BrokerInfo hold basic info of an tube broker the brokerId, the broker host
  * and the port and so on.
  */
 

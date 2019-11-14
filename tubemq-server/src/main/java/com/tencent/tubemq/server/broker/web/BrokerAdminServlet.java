@@ -26,11 +26,6 @@ import com.tencent.tubemq.server.broker.msgstore.MessageStoreManager;
 import com.tencent.tubemq.server.broker.nodeinfo.ConsumerNodeInfo;
 import com.tencent.tubemq.server.broker.offset.OffsetService;
 import com.tencent.tubemq.server.common.utils.WebParameterUtils;
-
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.List;
@@ -38,6 +33,10 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 
 /***
  * Broker's web servlet. Used for admin operation, like query consumer's status etc.
@@ -299,11 +298,9 @@ public class BrokerAdminServlet extends HttpServlet {
                 }
                 if (!topicName.matches(TBaseConstants.META_TMP_STRING_VALUE)) {
                     sBuilder.append("{\"result\":false,\"errCode\":400,\"errMsg\":\"")
-                            .append("Invalid parameter: the value of ")
-                            .append(topicName)
-                            .append(" in topicName parameter must begin with a letter,"
-                                    + " can only contain characters,numbers,and underscores!")
-                            .append("\"}");
+                            .append("Invalid parameter: the value of ").append(topicName)
+                            .append(" in topicName parameter must begin with a letter,")
+                            .append(" can only contain characters,numbers,and underscores!\"}");
                     return sBuilder;
                 }
                 bathTopicNames.add(topicName);

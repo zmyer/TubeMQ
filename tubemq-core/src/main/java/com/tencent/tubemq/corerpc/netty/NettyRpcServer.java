@@ -22,6 +22,7 @@
 
 package com.tencent.tubemq.corerpc.netty;
 
+import static com.tencent.tubemq.corebase.utils.AddressUtils.getRemoteAddressIP;
 import com.google.protobuf.Message;
 import com.tencent.tubemq.corebase.protobuf.generated.RPCProtos;
 import com.tencent.tubemq.corerpc.RequestWrapper;
@@ -36,15 +37,6 @@ import com.tencent.tubemq.corerpc.protocol.RpcProtocol;
 import com.tencent.tubemq.corerpc.server.RequestContext;
 import com.tencent.tubemq.corerpc.server.ServiceRpcServer;
 import com.tencent.tubemq.corerpc.utils.TSSLEngineUtil;
-import org.jboss.netty.bootstrap.ServerBootstrap;
-import org.jboss.netty.buffer.ChannelBuffer;
-import org.jboss.netty.channel.*;
-import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
-import org.jboss.netty.handler.ssl.SslHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import javax.net.ssl.SSLEngine;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -55,8 +47,22 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
-
-import static com.tencent.tubemq.corebase.utils.AddressUtils.getRemoteAddressIP;
+import javax.net.ssl.SSLEngine;
+import org.jboss.netty.bootstrap.ServerBootstrap;
+import org.jboss.netty.buffer.ChannelBuffer;
+import org.jboss.netty.channel.Channel;
+import org.jboss.netty.channel.ChannelHandler;
+import org.jboss.netty.channel.ChannelHandlerContext;
+import org.jboss.netty.channel.ChannelPipeline;
+import org.jboss.netty.channel.ChannelPipelineFactory;
+import org.jboss.netty.channel.DefaultChannelPipeline;
+import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import org.jboss.netty.channel.socket.nio.NioServerSocketChannelFactory;
+import org.jboss.netty.handler.ssl.SslHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /***
  * Netty Rpc Server
@@ -300,8 +306,9 @@ public class NettyRpcServer implements ServiceRpcServer {
                         long curTime = System.currentTimeMillis();
                         if (curTime - befTime > 180000) {
                             if (lastParseTime.compareAndSet(befTime, System.currentTimeMillis())) {
-                                logger.warn("[Abnormal Visit] Abnormal Message Content visit"
-                                        + " list is :" + errParseAddrMap.toString());
+                                logger.warn(new StringBuilder(512)
+                                        .append("[Abnormal Visit] Abnormal Message Content visit list is :")
+                                        .append(errParseAddrMap).toString());
                                 errParseAddrMap.clear();
                             }
                         }

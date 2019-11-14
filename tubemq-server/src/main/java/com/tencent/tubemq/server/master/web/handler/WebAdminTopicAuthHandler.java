@@ -17,6 +17,8 @@
 
 package com.tencent.tubemq.server.master.web.handler;
 
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.TypeReference;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
 import com.tencent.tubemq.server.common.utils.WebParameterUtils;
@@ -25,13 +27,15 @@ import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbConsumerGroupEnti
 import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbGroupFilterCondEntity;
 import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbTopicAuthControlEntity;
 import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerConfManage;
-import org.codehaus.jackson.map.ObjectMapper;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import javax.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.servlet.http.HttpServletRequest;
-import java.text.SimpleDateFormat;
-import java.util.*;
 
 
 public class WebAdminTopicAuthHandler {
@@ -110,7 +114,7 @@ public class WebAdminTopicAuthHandler {
             Date createDate =
                     WebParameterUtils.validDateParameter("createDate", req.getParameter("createDate"),
                             TBaseConstants.META_MAX_DATEVALUE_LENGTH, false, new Date());
-            List<LinkedHashMap<String, Object>> topicJsonArray =
+            List<Map<String, Object>> topicJsonArray =
                     WebParameterUtils.checkAndGetJsonArray("topicJsonSet",
                             req.getParameter("topicJsonSet"), TBaseConstants.META_VALUE_UNDEFINED, true);
             if ((topicJsonArray == null) || (topicJsonArray.isEmpty())) {
@@ -260,11 +264,11 @@ public class WebAdminTopicAuthHandler {
                     brokerConfManage.confGetBdbTopicAuthCtrlEntityList(queryEntity);
             SimpleDateFormat formatter =
                     new SimpleDateFormat(TBaseConstants.META_TMP_DATE_VALUE);
-            int count_i = 0;
+            int i = 0;
             sBuilder.append("{\"result\":true,\"errCode\":0,\"errMsg\":\"OK\",\"count\":")
                     .append(resultEntities.size()).append(",\"data\":[");
             for (BdbTopicAuthControlEntity entity : resultEntities) {
-                if (count_i++ > 0) {
+                if (i++ > 0) {
                     sBuilder.append(",");
                 }
                 sBuilder.append("{\"topicName\":\"").append(entity.getTopicName())
@@ -277,10 +281,10 @@ public class WebAdminTopicAuthHandler {
                 webConsumerGroupEntity.setGroupTopicName(entity.getTopicName());
                 List<BdbConsumerGroupEntity> webConsumerGroupEntities =
                         brokerConfManage.confGetBdbAllowedConsumerGroupSet(webConsumerGroupEntity);
-                int count_j = 0;
+                int j = 0;
                 if (!webConsumerGroupEntities.isEmpty()) {
                     for (BdbConsumerGroupEntity itemEntity : webConsumerGroupEntities) {
-                        if (count_j++ > 0) {
+                        if (j++ > 0) {
                             sBuilder.append(",");
                         }
                         sBuilder.append("{\"topicName\":\"").append(itemEntity.getGroupTopicName())
@@ -293,16 +297,16 @@ public class WebAdminTopicAuthHandler {
                                 .append("\"}");
                     }
                 }
-                sBuilder.append("],\"groupCount\":").append(count_j)
+                sBuilder.append("],\"groupCount\":").append(j)
                         .append(",\"authFilterCondSet\":[");
                 BdbGroupFilterCondEntity webFilterCondEntity =
                         new BdbGroupFilterCondEntity();
                 webFilterCondEntity.setTopicName(entity.getTopicName());
                 List<BdbGroupFilterCondEntity> webFilterCondEntities =
                         brokerConfManage.confGetBdbAllowedGroupFilterCondSet(webFilterCondEntity);
-                int count_y = 0;
+                int y = 0;
                 for (BdbGroupFilterCondEntity condEntity : webFilterCondEntities) {
-                    if (count_y++ > 0) {
+                    if (y++ > 0) {
                         sBuilder.append(",");
                     }
                     sBuilder.append("{\"topicName\":\"").append(condEntity.getTopicName())
@@ -319,7 +323,7 @@ public class WebAdminTopicAuthHandler {
                             .append("\",\"createDate\":\"").append(formatter.format(condEntity.getCreateDate()))
                             .append("\"}");
                 }
-                sBuilder.append("],\"filterCount\":").append(count_y).append("}");
+                sBuilder.append("],\"filterCount\":").append(y).append("}");
             }
             sBuilder.append("]}");
         } catch (Exception e) {
@@ -351,13 +355,12 @@ public class WebAdminTopicAuthHandler {
             final StringBuilder sBuilder) throws Exception {
         String strAuthConsumGroup = (String) jsonObject.get("authConsumeGroup");
         if ((strAuthConsumGroup != null) && (!TStringUtils.isBlank(strAuthConsumGroup))) {
-            ObjectMapper objectMapper2 = new ObjectMapper();
-            List<LinkedHashMap<String, String>> authConsumeGroupSet =
-                    objectMapper2.readValue(strAuthConsumGroup, List.class);
+            List<Map<String, String>> authConsumeGroupSet =
+                    JSON.parseObject(strAuthConsumGroup, new TypeReference<List<Map<String, String>>>() {});
             if ((authConsumeGroupSet != null)
                     && (!authConsumeGroupSet.isEmpty())) {
-                for (int count_j = 0; count_j < authConsumeGroupSet.size(); count_j++) {
-                    Map<String, String> groupObject = authConsumeGroupSet.get(count_j);
+                for (int j = 0; j < authConsumeGroupSet.size(); j++) {
+                    Map<String, String> groupObject = authConsumeGroupSet.get(j);
                     String groupName =
                             WebParameterUtils.validStringParameter("groupName",
                                     groupObject.get("groupName"),

@@ -19,7 +19,6 @@ package com.tencent.tubemq.corebase.cluster;
 
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.TokenConstants;
-
 import java.io.Serializable;
 
 
@@ -220,7 +219,7 @@ public class Partition implements Comparable<Partition>, Serializable {
     }
 
     /**
-     * get the partion full string info
+     * get the partition full string info
      *
      * @param overTLS
      * @return

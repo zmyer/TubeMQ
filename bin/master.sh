@@ -16,6 +16,9 @@
 # WARRANTIES OF ANY KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations under the License.
 #
+# modified version of <a href="https://github.com/killme2008/Metamorphosis">Metamorphosis Project</a>
+#
+
 
 #project directory
 if [ -z "$BASE_DIR" ] ; then
@@ -49,7 +52,7 @@ PID_FILE="$PID_DIR/.master.run.pid"
 function running(){
 	if [ -f "$PID_FILE" ]; then
 		pid=$(cat "$PID_FILE")
-		process=`ps aux | grep " $pid " | grep -v grep`;
+		process=`ps aux | grep " $pid "|grep "\-Dtubemq\.home=$BASE_DIR" | grep -v grep`;
 		if [ "$process" == "" ]; then
 	    	return 1;
 		else

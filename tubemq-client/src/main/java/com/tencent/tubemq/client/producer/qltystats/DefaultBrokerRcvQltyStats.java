@@ -17,19 +17,25 @@
 
 package com.tencent.tubemq.client.producer.qltystats;
 
+import com.tencent.tubemq.client.config.TubeClientConfig;
+import com.tencent.tubemq.client.exception.TubeClientException;
 import com.tencent.tubemq.corebase.TokenConstants;
 import com.tencent.tubemq.corebase.cluster.BrokerInfo;
 import com.tencent.tubemq.corebase.cluster.Partition;
-import com.tencent.tubemq.client.config.TubeClientConfig;
-import com.tencent.tubemq.client.exception.TubeClientException;
 import com.tencent.tubemq.corerpc.RpcServiceFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * An implementation of BrokerRcvQltyStats.
@@ -315,12 +321,14 @@ public class DefaultBrokerRcvQltyStats implements BrokerRcvQltyStats {
             if ((succRecvNum < avgSuccRecNumThreshold) && (succSendNumThreshold > 2)
                     && (succRecvNum < succSendNumThreshold)) {
                 tmpBrokerForbiddenMap.put(brokerDltNumEntry.getKey(), true);
-                logger.debug(sBuilder.append("[forbidden statistic] brokerId=")
+                if (logger.isDebugEnabled()) {
+                    logger.debug(sBuilder.append("[forbidden statistic] brokerId=")
                         .append(brokerDltNumEntry.getKey()).append(",succRecvNum=")
                         .append(succRecvNum).append(",avgSuccRecNumThreshold=")
                         .append(avgSuccRecNumThreshold).append(",succSendNumThreshold=")
                         .append(succSendNumThreshold).toString());
-                sBuilder.delete(0, sBuilder.length());
+                    sBuilder.delete(0, sBuilder.length());
+                }
             }
             if ((tmpBrokerForbiddenMap.size() >= needHoldCout)
                     || (succRecvNum >= avgSuccRecNumThreshold)) {

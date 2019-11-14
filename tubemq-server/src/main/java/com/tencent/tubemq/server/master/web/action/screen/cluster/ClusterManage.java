@@ -24,11 +24,10 @@ import com.tencent.tubemq.server.master.web.common.ClusterQueryResult;
 import com.tencent.tubemq.server.master.web.model.ClusterGroupVO;
 import com.tencent.tubemq.server.master.web.simplemvc.Action;
 import com.tencent.tubemq.server.master.web.simplemvc.RequestContext;
-
-import javax.servlet.http.HttpServletRequest;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import javax.servlet.http.HttpServletRequest;
 
 
 public class ClusterManage implements Action {
@@ -37,19 +36,6 @@ public class ClusterManage implements Action {
 
     public ClusterManage(TMaster master) {
         this.master = master;
-    }
-
-    public static void main(String[] args) {
-        new Thread() {
-            @Override
-            public void run() {
-                try {
-                    Thread.sleep(100000000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }.start();
     }
 
     @Override

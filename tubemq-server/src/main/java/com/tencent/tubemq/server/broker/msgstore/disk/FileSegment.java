@@ -19,9 +19,6 @@ package com.tencent.tubemq.server.broker.msgstore.disk;
 
 import com.tencent.tubemq.corebase.utils.CheckSum;
 import com.tencent.tubemq.server.broker.utils.DataStoreUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
@@ -29,6 +26,8 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /***
  * Segment file. Topic contains multi FileSegments. Each FileSegment contains data file and index file.
@@ -316,7 +315,7 @@ public class FileSegment implements Segment, Comparable<FileSegment> {
      * Check whether this FileSegment is expired, and set expire status. The last FileSegment cannot be marked expired.
      *
      * @param checkTimestamp check timestamp.
-     * @param maxValidTimeMs the max expire interval in millseconds.
+     * @param maxValidTimeMs the max expire interval in milliseconds.
      * @return -1 means already expired, 0 means the last FileSegment, 1 means expired.
      */
     @Override

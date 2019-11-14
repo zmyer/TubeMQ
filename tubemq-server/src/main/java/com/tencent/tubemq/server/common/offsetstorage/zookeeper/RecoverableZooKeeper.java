@@ -23,16 +23,19 @@
 package com.tencent.tubemq.server.common.offsetstorage.zookeeper;
 
 import com.tencent.tubemq.server.common.utils.Bytes;
-import org.apache.zookeeper.*;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import org.apache.zookeeper.AsyncCallback;
+import org.apache.zookeeper.CreateMode;
+import org.apache.zookeeper.KeeperException;
+import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.ZooKeeper;
 import org.apache.zookeeper.ZooKeeper.States;
 import org.apache.zookeeper.data.ACL;
 import org.apache.zookeeper.data.Stat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 
 
 /**
@@ -53,6 +56,8 @@ import java.util.List;
  * created is "x-352-109".
  *
  * @see "http://wiki.apache.org/hadoop/ZooKeeper/ErrorHandling"
+ *
+ * Copied from <a href="http://hbase.apache.org">Apache HBase Project</a>
  */
 public class RecoverableZooKeeper {
     private static final Logger logger =

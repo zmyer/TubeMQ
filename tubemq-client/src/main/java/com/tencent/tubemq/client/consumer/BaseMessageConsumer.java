@@ -17,6 +17,10 @@
 
 package com.tencent.tubemq.client.consumer;
 
+import com.tencent.tubemq.client.common.TubeClientVersion;
+import com.tencent.tubemq.client.config.ConsumerConfig;
+import com.tencent.tubemq.client.exception.TubeClientException;
+import com.tencent.tubemq.client.factory.InnerSessionFactory;
 import com.tencent.tubemq.corebase.Message;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.TErrCodeConstants;
@@ -36,26 +40,33 @@ import com.tencent.tubemq.corebase.utils.AddressUtils;
 import com.tencent.tubemq.corebase.utils.DataConverterUtil;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
 import com.tencent.tubemq.corebase.utils.ThreadUtils;
-import com.tencent.tubemq.client.common.TubeClientVersion;
-import com.tencent.tubemq.client.config.ConsumerConfig;
-import com.tencent.tubemq.client.exception.TubeClientException;
-import com.tencent.tubemq.client.factory.InnerSessionFactory;
 import com.tencent.tubemq.corerpc.RpcConfig;
 import com.tencent.tubemq.corerpc.RpcConstants;
 import com.tencent.tubemq.corerpc.RpcServiceFactory;
 import com.tencent.tubemq.corerpc.service.BrokerReadService;
 import com.tencent.tubemq.corerpc.service.MasterService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * An implementation of MessageConsumer.
@@ -80,10 +91,12 @@ public class BaseMessageConsumer implements MessageConsumer {
     private final BlockingQueue<ConsumerEvent> rebalanceResults =
             new ArrayBlockingQueue<ConsumerEvent>(REBALANCE_QUEUE_SIZE);
     // flowctrl
+    private boolean isCurGroupCtrl = false;
+    private AtomicLong lastCheckTime = new AtomicLong(0);
     private final FlowCtrlRuleHandler groupFlowCtrlRuleHandler =
-            new FlowCtrlRuleHandler();
+            new FlowCtrlRuleHandler(false);
     private final FlowCtrlRuleHandler defFlowCtrlRuleHandler =
-            new FlowCtrlRuleHandler();
+            new FlowCtrlRuleHandler(true);
     private final ConsumerSamplePrint samplePrintCtrl =
             new ConsumerSamplePrint();
     private final RpcConfig rpcConfig = new RpcConfig();
@@ -174,17 +187,11 @@ public class BaseMessageConsumer implements MessageConsumer {
                         }
                         switch (event.getType()) {
                             case DISCONNECT:
-                                disconnectFromBroker(event);
-                                rebalanceResults.put(event);
-                                break;
                             case ONLY_DISCONNECT:
                                 disconnectFromBroker(event);
                                 rebalanceResults.put(event);
                                 break;
                             case CONNECT:
-                                connect2Broker(event);
-                                rebalanceResults.put(event);
-                                break;
                             case ONLY_CONNECT:
                                 connect2Broker(event);
                                 rebalanceResults.put(event);
@@ -227,7 +234,7 @@ public class BaseMessageConsumer implements MessageConsumer {
      * @return message consumer
      * @throws TubeClientException
      */
-    protected MessageConsumer Subscribe(String topic,
+    protected MessageConsumer subscribe(String topic,
                                         TreeSet<String> filterConds,
                                         MessageListener messageListener) throws TubeClientException {
         this.checkClientRunning();
@@ -276,6 +283,7 @@ public class BaseMessageConsumer implements MessageConsumer {
      *
      * @throws TubeClientException
      */
+    @Override
     public void completeSubscribe() throws TubeClientException {
         this.checkClientRunning();
         if (this.consumeSubInfo.isSubscribedTopicEmpty()) {
@@ -296,6 +304,7 @@ public class BaseMessageConsumer implements MessageConsumer {
         this.subStatus.set(1);
     }
 
+    @Override
     public void completeSubscribe(final String sessionKey,
                                   final int sourceCount,
                                   final boolean isSelectBig,
@@ -322,8 +331,8 @@ public class BaseMessageConsumer implements MessageConsumer {
                     }
                     if (!consumeSubInfo.isSubscribedTopicContain(partitionKeyItems[1].trim())) {
                         throw new TubeClientException(new StringBuilder(256)
-                                .append("Parameter error: not included in subcribed topic list: " +
-                                        "partOffsetMap's key is ")
+                                .append("Parameter error: not included in subcribed topic list: ")
+                                .append("partOffsetMap's key is ")
                                 .append(entry.getKey()).append(", subscribed topics are ")
                                 .append(consumeSubInfo.getSubscribedTopics().toString()).toString());
                     }
@@ -722,6 +731,7 @@ public class BaseMessageConsumer implements MessageConsumer {
         builder.setClientId(this.consumerId);
         builder.setGroupName(this.consumerConfig.getConsumerGroup());
         builder.setTopicName(partition.getTopic());
+        builder.setEscFlowCtrl(isCurGroupCtrl());
         builder.setPartitionId(partition.getPartitionId());
         builder.setLastPackConsumed(isLastConsumed);
         builder.setManualCommitOffset(false);
@@ -790,21 +800,23 @@ public class BaseMessageConsumer implements MessageConsumer {
                                     || responseB2C.getErrCode() == TErrCodeConstants.CERTIFICATE_FAILURE) {
                                 unRegPartitions.remove(partition);
                                 if (responseB2C.getErrCode() == TErrCodeConstants.PARTITION_OCCUPIED) {
-                                    logger.debug(strBuffer
-                                            .append("[Partition occupied], curr consumerId: ")
-                                            .append(consumerId).append(", returned message : ")
-                                            .append(responseB2C.getErrMsg()).toString());
+                                    if (logger.isDebugEnabled()) {
+                                        logger.debug(strBuffer
+                                                .append("[Partition occupied], curr consumerId: ")
+                                                .append(consumerId).append(", returned message : ")
+                                                .append(responseB2C.getErrMsg()).toString());
+                                    }
                                 } else {
-                                    logger.debug(strBuffer
+                                    logger.warn(strBuffer
                                             .append("[Certificate failure], curr consumerId: ")
                                             .append(consumerId).append(", returned message : ")
                                             .append(responseB2C.getErrMsg()).toString());
                                 }
                             } else {
                                 logger.warn(strBuffer.append("register2broker error! ")
-                                        .append(retryTimesRegister2Broker).append(" register ")
-                                        .append(partition.toString()).append(" return ")
-                                        .append(responseB2C.getErrMsg()).toString());
+                                    .append(retryTimesRegister2Broker).append(" register ")
+                                    .append(partition.toString()).append(" return ")
+                                    .append(responseB2C.getErrMsg()).toString());
                             }
                             strBuffer.delete(0, strBuffer.length());
                         }
@@ -950,7 +962,7 @@ public class BaseMessageConsumer implements MessageConsumer {
         if (subInfoList != null) {
             builder.addAllSubscribeInfo(DataConverterUtil.formatSubInfo(subInfoList));
         }
-        ClientMaster.MasterCertificateInfo.Builder authInfoBuilder = genMasterCertificateInfo(false);
+        ClientMaster.MasterCertificateInfo.Builder authInfoBuilder = genMasterCertificateInfo(true);
         if (authInfoBuilder != null) {
             builder.setAuthInfo(authInfoBuilder.build());
         }
@@ -1034,7 +1046,7 @@ public class BaseMessageConsumer implements MessageConsumer {
         builder.setQryPriorityId(groupFlowCtrlRuleHandler.getQryPriorityId());
         builder.addAllPartitionInfo(partitionList);
         ClientBroker.AuthorizedInfo.Builder authInfoBuilder =
-                genBrokerAuthenticInfo(false);
+                genBrokerAuthenticInfo(true);
         if (authInfoBuilder != null) {
             builder.setAuthInfo(authInfoBuilder.build());
         }
@@ -1116,7 +1128,7 @@ public class BaseMessageConsumer implements MessageConsumer {
             authInfoBuilder = ClientMaster.MasterCertificateInfo.newBuilder();
             authInfoBuilder.setAuthInfo(authenticateHandler
                     .genMasterAuthenticateToken(consumerConfig.getUsrName(),
-                            consumerConfig.getUsrPassWord()));
+                            consumerConfig.getUsrPassWord()).build());
         }
         return authInfoBuilder;
     }
@@ -1157,8 +1169,7 @@ public class BaseMessageConsumer implements MessageConsumer {
                 String inAuthAuthorizedToken = inAuthorizedTokenInfo.getAuthAuthorizedToken();
                 if (TStringUtils.isNotBlank(inAuthAuthorizedToken)) {
                     String curAuthAuthorizedToken = authAuthorizedTokenRef.get();
-                    if (curAuthAuthorizedToken == null
-                            || !inAuthAuthorizedToken.equals(curAuthAuthorizedToken)) {
+                    if (!inAuthAuthorizedToken.equals(curAuthAuthorizedToken)) {
                         authAuthorizedTokenRef.set(inAuthAuthorizedToken);
                     }
                 }
@@ -1338,6 +1349,17 @@ public class BaseMessageConsumer implements MessageConsumer {
         }
     }
 
+    private boolean isCurGroupCtrl() {
+        long curCheckTime = this.lastCheckTime.get();
+        if (System.currentTimeMillis() - curCheckTime >= 10000) {
+            if (this.lastCheckTime.compareAndSet(curCheckTime, System.currentTimeMillis())) {
+                this.isCurGroupCtrl =
+                    this.groupFlowCtrlRuleHandler.getCurDataLimit(Long.MAX_VALUE) != null;
+            }
+        }
+        return this.isCurGroupCtrl;
+    }
+
     /**
      * Stopped the message listeners.
      */
@@ -1458,9 +1480,13 @@ public class BaseMessageConsumer implements MessageConsumer {
                         }
                         return;
                     }
-                    heartbeatRetryTimes++;
                     logger.error(strBuffer.append("[Heartbeat Failed] ")
                             .append(response.getErrMsg()).toString());
+                    if (response.getErrCode() == TErrCodeConstants.CERTIFICATE_FAILURE) {
+                        adjustHeartBeatPeriod("certificate failure", strBuffer);
+                    } else {
+                        heartbeatRetryTimes++;
+                    }
                     return;
                 }
                 // Process the heartbeat success response
@@ -1507,15 +1533,23 @@ public class BaseMessageConsumer implements MessageConsumer {
                 if (!isShutdown()) {
                     logger.error("Heartbeat failed,retry later.", e);
                 }
-                lastHeartbeatTime2Master = System.currentTimeMillis();
-                heartbeatRetryTimes++;
-                if (!isShutdown()
-                        && heartbeatRetryTimes > consumerConfig.getMaxHeartBeatRetryTimes()) {
-                    strBuffer.delete(0, strBuffer.length());
-                    logger.error(strBuffer.append("Heartbeat exception! Sleep ")
-                            .append(consumerConfig.getHeartbeatPeriodAfterFail())
-                            .append(" ms ").toString(), e);
-                    ThreadUtils.sleep(consumerConfig.getHeartbeatPeriodAfterFail());
+                adjustHeartBeatPeriod("heartbeat exception", strBuffer);
+            }
+        }
+
+        private void adjustHeartBeatPeriod(String reason, StringBuilder sBuilder) {
+            lastHeartbeatTime2Master = System.currentTimeMillis();
+            heartbeatRetryTimes++;
+            if (!isShutdown()
+                    && heartbeatRetryTimes > consumerConfig.getMaxHeartBeatRetryTimes()) {
+                logger.warn(sBuilder.append("Adjust HeartbeatPeriod for ").append(reason)
+                        .append(", sleep ").append(consumerConfig.getHeartbeatPeriodAfterFail())
+                        .append(" Ms").toString());
+                sBuilder.delete(0, sBuilder.length());
+                try {
+                    Thread.sleep(consumerConfig.getHeartbeatPeriodAfterFail());
+                } catch (InterruptedException e1) {
+                    //
                 }
             }
         }
@@ -1539,7 +1573,7 @@ public class BaseMessageConsumer implements MessageConsumer {
                                 .append(currentTime - lastHeartbeatTime2Broker).toString());
                         strBuffer.delete(0, strBuffer.length());
                     }
-                    // Send heartbeat request to the broker connect by the client针
+                    // Send heartbeat request to the broker connect by the client
                     for (BrokerInfo brokerInfo : rmtDataCache.getAllRegisterBrokers()) {
                         List<String> partStrSet = new ArrayList<String>();
                         try {
@@ -1572,8 +1606,8 @@ public class BaseMessageConsumer implements MessageConsumer {
                                                         strFailInfo.indexOf(TokenConstants.ATTR_SEP);
                                                 if (index < 0) {
                                                     logger.error(strBuffer
-                                                            .append("Parse Heartbeat response error : " +
-                                                                    "invalid response, ")
+                                                            .append("Parse Heartbeat response error : ")
+                                                            .append("invalid response, ")
                                                             .append(strFailInfo).toString());
                                                     strBuffer.delete(0, strBuffer.length());
                                                     continue;
@@ -1600,6 +1634,17 @@ public class BaseMessageConsumer implements MessageConsumer {
                                             }
                                         }
                                     }
+                                }
+                                if (heartBeatResponseV2.getErrCode() == TErrCodeConstants.CERTIFICATE_FAILURE) {
+                                    for (Partition partition : partitions) {
+                                        removePartition(partition);
+                                    }
+                                    logger.warn(strBuffer
+                                            .append("[heart2broker error] certificate failure, ")
+                                            .append(brokerInfo.getBrokerStrInfo())
+                                            .append("'s partitions ared released, ")
+                                            .append(heartBeatResponseV2.getErrMsg()).toString());
+                                    strBuffer.delete(0, strBuffer.length());
                                 }
                             }
                         } catch (Throwable ee) {

@@ -24,6 +24,11 @@ package com.tencent.tubemq.server.common.offsetstorage.zookeeper;
 
 import com.tencent.tubemq.corebase.utils.ThreadUtils;
 import com.tencent.tubemq.server.common.fileconfig.ZKConfig;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
@@ -31,12 +36,6 @@ import org.apache.zookeeper.ZooDefs;
 import org.apache.zookeeper.data.ACL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.CountDownLatch;
 
 
 /**
@@ -51,6 +50,8 @@ import java.util.concurrent.CountDownLatch;
  * <p/>
  * This class also holds and manages the connection to ZooKeeper. Code to deal with connection
  * related events and exceptions are handled here.
+ *
+ * modified version of <a href="http://hbase.apache.org">Apache HBase Project</a>
  */
 public class ZooKeeperWatcher implements Watcher, Abortable {
     // Certain ZooKeeper nodes need to be world-readable
@@ -111,7 +112,7 @@ public class ZooKeeperWatcher implements Watcher, Abortable {
         this.conf = conf;
         // Capture a stack trace now. Will print it out later if problem so we
         // can
-        // distingush amongst the myriad ZKWs.
+        // distinguish amongst the myriad ZKWs.
         try {
             throw new Exception("ZKW CONSTRUCTOR STACK TRACE FOR DEBUGGING");
         } catch (Exception e) {

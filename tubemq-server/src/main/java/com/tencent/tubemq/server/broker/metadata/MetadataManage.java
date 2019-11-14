@@ -19,13 +19,12 @@ package com.tencent.tubemq.server.broker.metadata;
 
 
 import com.tencent.tubemq.corebase.policies.FlowCtrlRuleHandler;
-
 import java.beans.PropertyChangeListener;
 import java.util.List;
 import java.util.Map;
 
 /***
- * Metadata's manangement interface.
+ * Metadata's management interface.
  */
 public interface MetadataManage {
     void close(long waitTimeMs);

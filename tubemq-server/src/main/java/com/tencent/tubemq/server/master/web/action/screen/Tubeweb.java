@@ -21,7 +21,6 @@ import com.tencent.tubemq.server.master.TMaster;
 import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerConfManage;
 import com.tencent.tubemq.server.master.web.simplemvc.Action;
 import com.tencent.tubemq.server.master.web.simplemvc.RequestContext;
-
 import java.net.InetSocketAddress;
 
 
@@ -31,19 +30,6 @@ public class Tubeweb implements Action {
 
     public Tubeweb(TMaster master) {
         this.master = master;
-    }
-
-    public static void main(String[] args) {
-        new Thread() {
-            @Override
-            public void run() {
-                try {
-                    Thread.sleep(100000000);
-                } catch (InterruptedException e) {
-                    e.printStackTrace();
-                }
-            }
-        }.start();
     }
 
     @Override

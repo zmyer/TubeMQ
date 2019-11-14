@@ -36,15 +36,6 @@ import com.tencent.tubemq.corerpc.codec.PbEnDecoder;
 import com.tencent.tubemq.corerpc.exception.ClientClosedException;
 import com.tencent.tubemq.corerpc.exception.NetworkException;
 import com.tencent.tubemq.corerpc.utils.MixUtils;
-import org.jboss.netty.channel.*;
-import org.jboss.netty.handler.timeout.ReadTimeoutException;
-import org.jboss.netty.util.HashedWheelTimer;
-import org.jboss.netty.util.Timeout;
-import org.jboss.netty.util.Timer;
-import org.jboss.netty.util.TimerTask;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.channels.UnresolvedAddressException;
@@ -54,10 +45,24 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import org.jboss.netty.channel.Channel;
+import org.jboss.netty.channel.ChannelHandler;
+import org.jboss.netty.channel.ChannelHandlerContext;
+import org.jboss.netty.channel.ChannelStateEvent;
+import org.jboss.netty.channel.ExceptionEvent;
+import org.jboss.netty.channel.MessageEvent;
+import org.jboss.netty.channel.SimpleChannelUpstreamHandler;
+import org.jboss.netty.handler.timeout.ReadTimeoutException;
+import org.jboss.netty.util.HashedWheelTimer;
+import org.jboss.netty.util.Timeout;
+import org.jboss.netty.util.Timer;
+import org.jboss.netty.util.TimerTask;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 
 /**
- * The network Client for tube rpc serivice
+ * The network Client for tube rpc service
  */
 public class NettyClient implements Client {
 
@@ -134,29 +139,28 @@ public class NettyClient implements Client {
         connectionHeader.writeDelimitedTo(bbo);
         rpcHeader.writeDelimitedTo(bbo);
         rpcBodyRequest.writeDelimitedTo(bbo);
-        RpcDataPack pack =
-                new RpcDataPack(request.getSerialNo(), bbo.getBufferList());
-        Channel channel1 = getChannel();
-        CallFuture<ResponseWrapper> future =
-                new CallFuture<ResponseWrapper>(callback);
+        RpcDataPack pack = new RpcDataPack(request.getSerialNo(), bbo.getBufferList());
+        CallFuture<ResponseWrapper> future = new CallFuture<ResponseWrapper>(callback);
         requests.put(request.getSerialNo(), future);
-        if (channel1 == null) {
-            logger.error(new StringBuilder(256)
-                    .append(this.addressInfo.getHostPortStr())
-                    .append("'s channel is null").toString());
-        } else {
-            getChannel().write(pack);
-        }
         if (callback == null) {
             try {
+                getChannel().write(pack);
                 return future.get(timeout, timeUnit);
-            } catch (TimeoutException e) {
+            } catch (Throwable e) {
                 requests.remove(request.getSerialNo());
                 throw e;
             }
         } else {
-            timeouts.put(request.getSerialNo(),
-                    timer.newTimeout(new TimeoutTask(request.getSerialNo()), timeout, timeUnit));
+            try {
+                timeouts.put(request.getSerialNo(),
+                        timer.newTimeout(new TimeoutTask(request.getSerialNo()), timeout, timeUnit));
+                //write data after build Timeout to avoid one request processed twice
+                getChannel().write(pack);
+            } catch (Throwable e) {
+                requests.remove(request.getSerialNo());
+                throw e;
+            }
+
         }
         return null;
     }
@@ -335,11 +339,11 @@ public class NettyClient implements Client {
             }
         }
 
-        @Override
         /**
          * Invoked when an exception was raised by an I/O thread or a
          * {@link ChannelHandler}.
          */
+        @Override
         public void exceptionCaught(ChannelHandlerContext ctx, ExceptionEvent e) throws Exception {
             Throwable t = e.getCause();
             if (t != null

@@ -18,7 +18,6 @@
 package com.tencent.tubemq.server.broker.msgstore.mem;
 
 import com.tencent.tubemq.server.common.TServerConstants;
-
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.TimeZone;
@@ -58,7 +57,7 @@ public class MsgMemStatisInfo {
     }
 
     /***
-     * Add write fail count statitic.
+     * Add write fail count statistic.
      */
     public void addWriteFailCount() {
         if (isStart.get()) {

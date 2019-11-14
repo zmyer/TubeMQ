@@ -22,20 +22,20 @@
 
 package com.tencent.tubemq.server.common.utils;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import sun.misc.Unsafe;
-
 import java.io.UnsupportedEncodingException;
 import java.lang.reflect.Field;
 import java.nio.ByteOrder;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import sun.misc.Unsafe;
 
 
 /**
  * Utility class that handles byte arrays, conversions to/from other types, comparisons, hash code
  * generation, manufacturing keys for HashMaps or HashSets, etc.
+ * Copied from <a href="http://hbase.apache.org">Apache HBase Project</a>
  */
 public class Bytes {
     /**
@@ -165,13 +165,13 @@ public class Bytes {
         enum UnsafeComparer implements Comparer<byte[]> {
             INSTANCE;
 
-            static final Unsafe theUnsafe;
+            private static final Unsafe theUnsafe;
 
             /**
              * The offset to the first element in a byte array.
              */
-            static final int BYTE_ARRAY_BASE_OFFSET;
-            static final boolean littleEndian =
+            private static final int BYTE_ARRAY_BASE_OFFSET;
+            private static final boolean littleEndian =
                     ByteOrder.nativeOrder().equals(ByteOrder.LITTLE_ENDIAN);
 
             static {

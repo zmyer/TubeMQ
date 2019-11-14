@@ -26,7 +26,6 @@ import com.tencent.tubemq.corerpc.codec.PbEnDecoder;
 import com.tencent.tubemq.corerpc.exception.StandbyException;
 import com.tencent.tubemq.corerpc.protocol.RpcProtocol;
 import com.tencent.tubemq.corerpc.utils.MixUtils;
-
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -46,7 +45,7 @@ public class RpcServiceFailoverInvoker extends AbstractServiceInvoker {
         super(clientFactory, serviceClass, conf);
         this.masterInfo = masterInfo;
         this.masterNodeCnt = masterInfo.getNodeHostPortList().size();
-        getNextClient();
+        getNextClient(false);
     }
 
     @Override
@@ -54,9 +53,9 @@ public class RpcServiceFailoverInvoker extends AbstractServiceInvoker {
                              Object arg, Callback callback) throws Throwable {
         if (currentClient == null
                 || !currentClient.isReady()) {
-            getNextClient();
+            getNextClient(false);
         }
-        long currentCounter = retryCounter.get();
+        int currentCounter = retryCounter.get();
         RequestWrapper requestWrapper =
                 new RequestWrapper(PbEnDecoder.getServiceIdByServiceName(targetInterface),
                         RpcProtocol.RPC_PROTOCOL_VERSION,
@@ -67,37 +66,46 @@ public class RpcServiceFailoverInvoker extends AbstractServiceInvoker {
         Throwable t = null;
         for (int i = 0; i < masterNodeCnt; i++) {
             if (currentClient != null) {
-                ResponseWrapper responseWrapper =
-                        currentClient.call(requestWrapper, callback,
-                                requestTimeout, TimeUnit.MILLISECONDS);
-                if (responseWrapper != null) {
-                    if (responseWrapper.isSuccess()) {
-                        return responseWrapper.getResponseData();
-                    } else {
-                        Throwable remote =
-                                MixUtils.unwrapException(new StringBuilder(512)
-                                        .append(responseWrapper.getErrMsg()).append("#")
-                                        .append(responseWrapper.getStackTrace()).toString());
-                        if ((IOException.class.isAssignableFrom(remote.getClass()))
-                                || (StandbyException.class.isAssignableFrom(remote.getClass()))) {
-                            if (currentCounter == retryCounter.get()) {
-                                getNextClient();
-                                currentCounter++;
-                            }
-                            t = remote;
+                try {
+                    ResponseWrapper responseWrapper =
+                            currentClient.call(requestWrapper, callback,
+                                    requestTimeout, TimeUnit.MILLISECONDS);
+                    if (responseWrapper != null) {
+                        if (responseWrapper.isSuccess()) {
+                            return responseWrapper.getResponseData();
                         } else {
-                            throw remote;
+                            Throwable remote =
+                                    MixUtils.unwrapException(new StringBuilder(512)
+                                            .append(responseWrapper.getErrMsg()).append("#")
+                                            .append(responseWrapper.getStackTrace()).toString());
+                            if ((IOException.class.isAssignableFrom(remote.getClass()))
+                                    || (StandbyException.class.isAssignableFrom(remote.getClass()))) {
+                                if (currentCounter == retryCounter.get()) {
+                                    getNextClient(true);
+                                    currentCounter++;
+                                }
+                                t = remote;
+                            } else {
+                                throw remote;
+                            }
                         }
+                    } else {
+                        break;
                     }
-                } else {
-                    break;
+                } catch (Throwable e) {
+                    // If the call throws an exception and the master address is not polled, we need to try again.
+                    if (currentCounter == retryCounter.get()) {
+                        getNextClient(true);
+                        currentCounter++;
+                    }
+                    t = e;
                 }
             } else {
-                int index = (int) (currentCounter % (long) (masterNodeCnt));
+                int index = (currentCounter & Integer.MAX_VALUE) % masterNodeCnt;
                 t = new IOException(new StringBuilder(512).append("Connect server ")
                         .append(masterInfo.getNodeHostPortList().get(index)).append(" failure!").toString());
                 if (currentCounter == retryCounter.get()) {
-                    getNextClient();
+                    getNextClient(false);
                     currentCounter++;
                 }
             }
@@ -108,8 +116,15 @@ public class RpcServiceFailoverInvoker extends AbstractServiceInvoker {
         return null;
     }
 
-    private synchronized Client getNextClient() {
-        if (currentClient == null || !currentClient.isReady()) {
+    private synchronized Client getNextClient(boolean forceChange) {
+        // forceChange : force to create a new connection to the master
+        if (currentClient != null) {
+            if (forceChange || !currentClient.isReady()) {
+                currentClient.close();
+                currentClient = null;
+            }
+        }
+        if (currentClient == null) {
             Client client = null;
             int retryTimes = masterNodeCnt;
             List<String> addressList = masterInfo.getNodeHostPortList();

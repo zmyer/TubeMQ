@@ -22,12 +22,16 @@
 
 package com.tencent.tubemq.server.common.offsetstorage.zookeeper;
 
+import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.concurrent.TimeUnit;
 
-
+/**
+ * Utility for retry counter.
+ *
+ * Copied from <a href="http://hbase.apache.org">Apache HBase Project</a>
+ */
 public class RetryCounter {
     private static final Logger logger = LoggerFactory.getLogger(RetryCounter.class);
     private final int maxRetries;

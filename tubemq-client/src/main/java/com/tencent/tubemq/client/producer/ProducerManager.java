@@ -17,6 +17,10 @@
 
 package com.tencent.tubemq.client.producer;
 
+import com.tencent.tubemq.client.common.TubeClientVersion;
+import com.tencent.tubemq.client.config.TubeClientConfig;
+import com.tencent.tubemq.client.exception.TubeClientException;
+import com.tencent.tubemq.client.factory.InnerSessionFactory;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.TErrCodeConstants;
 import com.tencent.tubemq.corebase.aaaclient.ClientAuthenticateHandler;
@@ -29,26 +33,29 @@ import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster;
 import com.tencent.tubemq.corebase.utils.AddressUtils;
 import com.tencent.tubemq.corebase.utils.DataConverterUtil;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
-import com.tencent.tubemq.client.common.TubeClientVersion;
-import com.tencent.tubemq.client.config.TubeClientConfig;
-import com.tencent.tubemq.client.exception.TubeClientException;
-import com.tencent.tubemq.client.factory.InnerSessionFactory;
 import com.tencent.tubemq.corerpc.RpcConfig;
 import com.tencent.tubemq.corerpc.RpcConstants;
 import com.tencent.tubemq.corerpc.RpcServiceFactory;
 import com.tencent.tubemq.corerpc.exception.ClientClosedException;
 import com.tencent.tubemq.corerpc.exception.LocalConnException;
 import com.tencent.tubemq.corerpc.service.MasterService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.lang.management.ManagementFactory;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Produce messages through rpc.
@@ -143,9 +150,9 @@ public class ProducerManager {
     /**
      * Start the producer manager.
      *
-     * @throws TubeClientException
+     * @throws Throwable
      */
-    public void start() throws TubeClientException {
+    public void start() throws Throwable {
         if (nodeStatus.get() <= 0) {
             if (nodeStatus.compareAndSet(-1, 0)) {
                 register2Master();
@@ -368,7 +375,7 @@ public class ProducerManager {
         }
     }
 
-    private void register2Master() throws TubeClientException {
+    private void register2Master() throws Throwable {
         int remainingRetry =
                 this.tubeClientConfig.getMaxRegisterRetryTimes();
         StringBuilder sBuilder = new StringBuilder(512);
@@ -412,7 +419,7 @@ public class ProducerManager {
                     //
                 }
                 if (remainingRetry <= 0) {
-                    throw new TubeClientException("Register producer exception, error is ", e);
+                    throw e;
                 }
             }
         } while (true);
@@ -446,7 +453,7 @@ public class ProducerManager {
         }
         builder.setHostName(AddressUtils.getLocalAddress());
         ClientMaster.MasterCertificateInfo.Builder authInfoBuilder =
-                genMasterCertificateInfo(false);
+                genMasterCertificateInfo(true);
         if (authInfoBuilder != null) {
             builder.setAuthInfo(authInfoBuilder.build());
         }
@@ -584,7 +591,7 @@ public class ProducerManager {
             authInfoBuilder = ClientMaster.MasterCertificateInfo.newBuilder();
             authInfoBuilder.setAuthInfo(authenticateHandler
                     .genMasterAuthenticateToken(tubeClientConfig.getUsrName(),
-                            tubeClientConfig.getUsrPassWord()));
+                            tubeClientConfig.getUsrPassWord()).build());
         }
         return authInfoBuilder;
     }
@@ -616,15 +623,17 @@ public class ProducerManager {
                         logger.error(sBuilder.append("[Heartbeat Failed] ")
                                 .append(response.getErrMsg()).toString());
                         sBuilder.delete(0, sBuilder.length());
-                        if (response.getErrCode() == TErrCodeConstants.HB_NO_NODE
-                                || response.getErrCode() == TErrCodeConstants.CERTIFICATE_FAILURE) {
+                        if (response.getErrCode() == TErrCodeConstants.HB_NO_NODE) {
                             try {
                                 register2Master();
                             } catch (Throwable ee) {
                                 logger.error(sBuilder
-                                        .append("[Heartbeat Failed] re-register failure, error is ")
-                                        .append(ee.getMessage()).toString());
+                                    .append("[Heartbeat Failed] re-register failure, error is ")
+                                    .append(ee.getMessage()).toString());
+                                sBuilder.delete(0, sBuilder.length());
                             }
+                        } else if (response.getErrCode() == TErrCodeConstants.CERTIFICATE_FAILURE) {
+                            adjustHeartBeatPeriod("certificate failure", sBuilder);
                         }
                     }
                     return;
@@ -675,23 +684,28 @@ public class ProducerManager {
                                     .append("#").append(e.getMessage()).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                lastHeartbeatTime = System.currentTimeMillis();
-                heartbeatRetryTimes++;
-                if ((nodeStatus.get() == 1)
-                        && heartbeatRetryTimes > tubeClientConfig.getMaxHeartBeatRetryTimes()) {
-                    logger.error(sBuilder.append("Heartbeat exception! Sleep ")
-                            .append(tubeClientConfig.getHeartbeatPeriodAfterFail())
-                            .append(" Ms").toString(), e);
-                    sBuilder.delete(0, sBuilder.length());
-                    try {
-                        Thread.sleep(tubeClientConfig.getHeartbeatPeriodAfterFail());
-                    } catch (InterruptedException e1) {
-                        return;
-                    }
-                }
+                adjustHeartBeatPeriod("heartbeat exception", sBuilder);
             } finally {
                 heartBeatStatus.compareAndSet(1, 0);
             }
         }
+
+        private void adjustHeartBeatPeriod(String reason, StringBuilder sBuilder) {
+            lastHeartbeatTime = System.currentTimeMillis();
+            heartbeatRetryTimes++;
+            if ((nodeStatus.get() != 1)
+                && heartbeatRetryTimes > tubeClientConfig.getMaxHeartBeatRetryTimes()) {
+                logger.warn(sBuilder.append("Adjust HeartbeatPeriod for ").append(reason)
+                    .append(", sleep ").append(tubeClientConfig.getHeartbeatPeriodAfterFail())
+                    .append(" Ms").toString());
+                sBuilder.delete(0, sBuilder.length());
+                try {
+                    Thread.sleep(tubeClientConfig.getHeartbeatPeriodAfterFail());
+                } catch (InterruptedException e1) {
+                    return;
+                }
+            }
+        }
     }
+
 }

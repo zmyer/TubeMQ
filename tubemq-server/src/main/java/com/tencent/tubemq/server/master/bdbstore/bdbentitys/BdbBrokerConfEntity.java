@@ -24,10 +24,9 @@ import com.tencent.tubemq.corebase.TokenConstants;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
 import com.tencent.tubemq.server.common.TServerConstants;
 import com.tencent.tubemq.server.common.utils.WebParameterUtils;
-import org.apache.commons.lang.builder.ToStringBuilder;
-
 import java.io.Serializable;
 import java.util.Date;
+import org.apache.commons.lang.builder.ToStringBuilder;
 
 
 @Entity
@@ -78,7 +77,6 @@ public class BdbBrokerConfEntity implements Serializable {
         this.brokerId = brokerId;
         this.brokerIp = brokerIp;
         this.brokerPort = brokerPort;
-        this.buildStrInfo();
         this.manageStatus = manageStatus;
         this.numPartitions = numPartitions;
         this.unflushThreshold = unflushThreshold;
@@ -94,6 +92,7 @@ public class BdbBrokerConfEntity implements Serializable {
         this.modifyUser = modifyUser;
         this.modifyDate = modifyDate;
         this.attributes = attributes;
+        this.buildStrInfo();
     }
 
     /**

@@ -23,14 +23,19 @@ import com.alibaba.fastjson.JSONObject;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.TokenConstants;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReentrantLock;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Flow control rule processing logic, including parsing the flow control json string,
@@ -38,7 +43,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * the processing speed
  */
 public class FlowCtrlRuleHandler {
-
+    private final boolean isDefaultHandler;
+    private final String flowCtrlName;
     private static final Logger logger =
             LoggerFactory.getLogger(FlowCtrlRuleHandler.class);
     private final TimeZone timeZone = TimeZone.getTimeZone("GMT+8:00");
@@ -51,7 +57,7 @@ public class FlowCtrlRuleHandler {
     private AtomicInteger qryPriorityId =
             new AtomicInteger(TBaseConstants.META_VALUE_UNDEFINED);
     private String strFlowCtrlInfo;
-    // The maximum interval of the flow control extracts the set of values, 
+    // The maximum interval of the flow control extracts the set of values,
     //improving the efficiency of the search return in the range
     private AtomicInteger minZeroCnt =
             new AtomicInteger(Integer.MAX_VALUE);
@@ -76,7 +82,13 @@ public class FlowCtrlRuleHandler {
     private Map<Integer, List<FlowCtrlItem>> flowCtrlRuleSet =
             new ConcurrentHashMap<Integer, List<FlowCtrlItem>>();
 
-    public FlowCtrlRuleHandler() {
+    public FlowCtrlRuleHandler(boolean isDefault) {
+        this.isDefaultHandler = isDefault;
+        if (this.isDefaultHandler) {
+            flowCtrlName = "Default_FlowCtrl";
+        } else {
+            flowCtrlName = "Group_FlowCtrl";
+        }
 
     }
 
@@ -103,10 +115,10 @@ public class FlowCtrlRuleHandler {
             this.flowCtrlId.set(flowCtrlId);
             this.strFlowCtrlInfo = flowCtrlInfo;
             logger.info(new StringBuilder(512)
-                    .append("[Flow Ctrl] FlowCtrl Rule updated to flowId=")
-                    .append(flowCtrlId).append(",ssdTranslateId=")
-                    .append(ssdTranslateId).append(",qyrPriorityId=")
-                    .append(qyrPriorityId).toString());
+                .append("[Flow Ctrl] Updated ").append(flowCtrlName)
+                .append(" to flowId=").append(flowCtrlId)
+                .append(",ssdTranslateId=").append(ssdTranslateId)
+                .append(",qyrPriorityId=").append(qyrPriorityId).toString());
             this.ssdTranslateId.set(ssdTranslateId);
             this.qryPriorityId.set(qyrPriorityId);
             clearStatisData();
@@ -386,16 +398,16 @@ public class FlowCtrlRuleHandler {
             throws Exception {
         Map<Integer, List<FlowCtrlItem>> flowCtrlMap = new ConcurrentHashMap<Integer, List<FlowCtrlItem>>();
         if (TStringUtils.isBlank(flowCtrlInfo)) {
-            throw new Exception("Parsing error, flowCtrlInfo's value is blank!");
+            throw new Exception("Parsing error, flowCtrlInfo value is blank!");
         }
         JSONArray objArray = null;
         try {
             objArray = JSON.parseArray(flowCtrlInfo);
         } catch (Throwable e1) {
-            throw new Exception("Parse flowCtrlInfo's value failure", e1);
+            throw new Exception("Parse flowCtrlInfo value failure", e1);
         }
         if (objArray == null) {
-            throw new Exception("Parsing error, flowCtrlInfo's value must be valid json format!");
+            throw new Exception("Parsing error, flowCtrlInfo value must be valid json format!");
         }
         if (objArray.size() == 0) {
             return flowCtrlMap;
@@ -434,7 +446,8 @@ public class FlowCtrlRuleHandler {
                 }
             }
         } catch (Throwable e2) {
-            throw new Exception("Parse flow-ctrl rule failure", e2);
+            throw new Exception(new StringBuilder(512).append("Parse flow-ctrl rule failure, ")
+                    .append(e2.getMessage()).toString());
         }
         return flowCtrlMap;
     }
@@ -450,11 +463,11 @@ public class FlowCtrlRuleHandler {
      */
     private List<FlowCtrlItem> parseDataLimit(int typeVal, JSONObject jsonObject) throws Exception {
         if (jsonObject == null || jsonObject.getIntValue("type") != 0) {
-            throw new Exception("Parse data limit rule failure!");
+            throw new Exception("parse data limit rule failure!");
         }
         JSONArray ruleArray = jsonObject.getJSONArray("rule");
         if (ruleArray == null) {
-            throw new Exception("Not found rule list in data limit!");
+            throw new Exception("not found rule list in data limit!");
         }
         ArrayList<FlowCtrlItem> flowCtrlItems = new ArrayList<FlowCtrlItem>();
         for (int index = 0; index < ruleArray.size(); index++) {
@@ -476,7 +489,7 @@ public class FlowCtrlRuleHandler {
             long dltVal = ruleObject.getLong("dltInM");
             if (dltVal <= 20) {
                 throw new Exception(new StringBuilder(512)
-                        .append("dltInM value must over than 20 in index(")
+                        .append("dltInM value must be greater than 20 in index(")
                         .append(index).append(") of data limit rule!").toString());
             }
             if (!ruleObject.containsKey("limitInM")) {
@@ -487,7 +500,7 @@ public class FlowCtrlRuleHandler {
             long dataLimitInM = ruleObject.getLong("limitInM");
             if (dataLimitInM < 0) {
                 throw new Exception(new StringBuilder(512)
-                        .append("limitInM value must over than equal or bigger than zero in index(")
+                        .append("limitInM value must be greater than or equal to zero in index(")
                         .append(index).append(") of data limit rule!").toString());
             }
             dataLimitInM = dataLimitInM * 1024 * 1024;
@@ -499,7 +512,7 @@ public class FlowCtrlRuleHandler {
             int freqInMs = ruleObject.getIntValue("freqInMs");
             if (freqInMs < 200) {
                 throw new Exception(new StringBuilder(512)
-                        .append("freqInMs value must over than equal or bigger than 200 in index(")
+                        .append("freqInMs value must be greater than or equal to 200 in index(")
                         .append(index).append(") of data limit rule!").toString());
             }
             flowCtrlItems.add(new FlowCtrlItem(typeVal,
@@ -530,11 +543,11 @@ public class FlowCtrlRuleHandler {
     private List<FlowCtrlItem> parseFreqLimit(int typeVal,
                                               JSONObject jsonObject) throws Exception {
         if (jsonObject == null || jsonObject.getIntValue("type") != 1) {
-            throw new Exception("Parse freq limit rule failure!");
+            throw new Exception("parse freq limit rule failure!");
         }
         JSONArray ruleArray = jsonObject.getJSONArray("rule");
         if (ruleArray == null) {
-            throw new Exception("Not found rule list in freq limit!");
+            throw new Exception("not found rule list in freq limit!");
         }
         ArrayList<FlowCtrlItem> flowCtrlItems = new ArrayList<FlowCtrlItem>();
         for (int index = 0; index < ruleArray.size(); index++) {
@@ -547,7 +560,7 @@ public class FlowCtrlRuleHandler {
             int zeroCnt = ruleObject.getIntValue("zeroCnt");
             if (zeroCnt < 1) {
                 throw new Exception(new StringBuilder(512)
-                        .append("zeroCnt value must over than equal or bigger than 1 in index(")
+                        .append("zeroCnt value must be greater than or equal to 1 in index(")
                         .append(index).append(") of freq limit rule!").toString());
             }
             if (!ruleObject.containsKey("freqInMs")) {
@@ -558,7 +571,7 @@ public class FlowCtrlRuleHandler {
             int freqInMs = ruleObject.getIntValue("freqInMs");
             if (freqInMs < 0) {
                 throw new Exception(new StringBuilder(512)
-                        .append("freqInMs value must over than equal or bigger than zero in index(")
+                        .append("freqInMs value must be greater than or equal to zero in index(")
                         .append(index).append(") of freq limit rule!").toString());
             }
             flowCtrlItems.add(new FlowCtrlItem(typeVal, zeroCnt, freqInMs));
@@ -588,14 +601,14 @@ public class FlowCtrlRuleHandler {
     private List<FlowCtrlItem> parseLowFetchLimit(int typeVal,
                                                   JSONObject jsonObject) throws Exception {
         if (jsonObject == null || jsonObject.getIntValue("type") != 3) {
-            throw new Exception("Parse low fetch limit rule failure!");
+            throw new Exception("parse low fetch limit rule failure!");
         }
         JSONArray ruleArray = jsonObject.getJSONArray("rule");
         if (ruleArray == null) {
-            throw new Exception("Not found rule list in low fetch limit!");
+            throw new Exception("not found rule list in low fetch limit!");
         }
         if (ruleArray.size() > 1) {
-            throw new Exception("Only allow set one rule in low fetch limit!");
+            throw new Exception("only allow set one rule in low fetch limit!");
         }
         ArrayList<FlowCtrlItem> flowCtrlItems = new ArrayList<FlowCtrlItem>();
         for (int index = 0; index < ruleArray.size(); index++) {
@@ -624,7 +637,8 @@ public class FlowCtrlRuleHandler {
                 }
                 if (minDataFilterFreqInMs < filterFreqInMs) {
                     throw new Exception(new StringBuilder(512)
-                            .append("minDataFilterFreqInMs must lower than filterFreqInMs in index(")
+                            .append("minDataFilterFreqInMs value must be greater than ")
+                            .append("or equal to filterFreqInMs value in index(")
                             .append(index).append(") of low fetch limit rule!").toString());
                 }
             }
@@ -664,11 +678,11 @@ public class FlowCtrlRuleHandler {
     private List<FlowCtrlItem> parseSSDProcLimit(int typeVal,
                                                  JSONObject jsonObject) throws Exception {
         if (jsonObject == null || jsonObject.getIntValue("type") != 2) {
-            throw new Exception("Parse SSD limit rule failure!");
+            throw new Exception("parse SSD limit rule failure!");
         }
         JSONArray ruleArray = jsonObject.getJSONArray("rule");
         if (ruleArray == null) {
-            throw new Exception("Not found rule list in SSD limit!");
+            throw new Exception("not found rule list in SSD limit!");
         }
         ArrayList<FlowCtrlItem> flowCtrlItems = new ArrayList<FlowCtrlItem>();
         for (int index = 0; index < ruleArray.size(); index++) {
@@ -679,7 +693,7 @@ public class FlowCtrlRuleHandler {
                     ruleObject.getString("end"), index, "SSD");
             if (startTime >= endTime) {
                 throw new Exception(new StringBuilder(512)
-                        .append("start value must lower than the End value in index(")
+                        .append("start value must be less than End value in index(")
                         .append(index).append(") of SSD limit rule!").toString());
             }
             if (!ruleObject.containsKey("dltStInM")) {
@@ -690,7 +704,7 @@ public class FlowCtrlRuleHandler {
             long dltStInM = ruleObject.getLong("dltStInM");
             if (dltStInM < 512) {
                 throw new Exception(new StringBuilder(512)
-                        .append("dltStInM value must over than 512 in index(")
+                        .append("dltStInM value must be greater than or equal to 512 in index(")
                         .append(index).append(") of SSD limit rule!").toString());
             }
             if (!ruleObject.containsKey("dltEdInM")) {
@@ -701,17 +715,18 @@ public class FlowCtrlRuleHandler {
             long dataEndInM = ruleObject.getLong("dltEdInM");
             if (dataEndInM < 0) {
                 throw new Exception(new StringBuilder(512)
-                        .append("dltEdInM value must over than equal or bigger than zero in index(")
+                        .append("dltEdInM value must be greater than or equal to zero in index(")
                         .append(index).append(") of SSD limit rule!").toString());
             }
             if (dataEndInM < 512) {
                 throw new Exception(new StringBuilder(512)
-                        .append("dltStInM value must over than 512 in index(")
+                        .append("dltStInM value must be greater than or equal to 512 in index(")
                         .append(index).append(") of SSD limit rule!").toString());
             }
             if (dltStInM < dataEndInM) {
                 throw new Exception(new StringBuilder(512)
-                        .append("dltStInM value must bigger or equal than dltEdInM value in index(")
+                        .append("dltStInM value must be greater than ")
+                        .append("or equal to dltEdInM value in index(")
                         .append(index).append(") of SSD limit rule!").toString());
             }
             dltStInM = (long) (dltStInM * 1024 * 1024);
@@ -760,21 +775,21 @@ public class FlowCtrlRuleHandler {
         if ((startItems.length != 2)
                 || TStringUtils.isBlank(startItems[0])
                 || TStringUtils.isBlank(startItems[1])) {
-            throw new Exception("Illegal format: " + strValName
+            throw new Exception("illegal format, " + strValName
                     + " value must be 'aa:bb' and 'aa','bb' must be int value format in "
                     + ruleType + " limit rule!");
         }
         try {
             timeHour = Integer.valueOf(startItems[0]);
         } catch (Throwable e2) {
-            throw new Exception("Illegal format: " + strValName
+            throw new Exception("illegal format, " + strValName
                     + " value must be 'aa:bb' and 'aa' must be int value in "
                     + ruleType + " limit rule!");
         }
         try {
             timeMin = Integer.valueOf(startItems[1]);
         } catch (Throwable e2) {
-            throw new Exception("Illegal format: " + strValName
+            throw new Exception("illegal format, " + strValName
                     + " value must be 'aa:bb' and 'bb' must be int value in "
                     + ruleType + " limit rule!");
         }

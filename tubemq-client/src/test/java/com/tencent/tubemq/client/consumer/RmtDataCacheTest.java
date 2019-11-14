@@ -17,23 +17,25 @@
 
 package com.tencent.tubemq.client.consumer;
 
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import com.tencent.tubemq.corebase.cluster.BrokerInfo;
 import com.tencent.tubemq.corebase.cluster.Partition;
 import com.tencent.tubemq.corebase.policies.FlowCtrlRuleHandler;
-import org.junit.Test;
-
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
-
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import org.junit.Test;
 
 public class RmtDataCacheTest {
 
     @Test
     public void testRmtDataCache() {
-        FlowCtrlRuleHandler groupFlowCtrlRuleHandler = new FlowCtrlRuleHandler();
-        FlowCtrlRuleHandler defFlowCtrlRuleHandler = new FlowCtrlRuleHandler();
+        FlowCtrlRuleHandler groupFlowCtrlRuleHandler = new FlowCtrlRuleHandler(false);
+        FlowCtrlRuleHandler defFlowCtrlRuleHandler = new FlowCtrlRuleHandler(true);
         List<Partition> partitions = new ArrayList<>();
         BrokerInfo brokerInfo = new BrokerInfo(1, "127.0.0.1", 18080);
         Partition expectPartition = new Partition(brokerInfo, "test", 1);

@@ -17,8 +17,6 @@
 
 package com.tencent.tubemq.example;
 
-import com.tencent.tubemq.corebase.Message;
-import com.tencent.tubemq.corebase.utils.ThreadUtils;
 import com.tencent.tubemq.client.config.ConsumerConfig;
 import com.tencent.tubemq.client.consumer.ConsumeOffsetInfo;
 import com.tencent.tubemq.client.consumer.ConsumerResult;
@@ -26,31 +24,36 @@ import com.tencent.tubemq.client.consumer.PullMessageConsumer;
 import com.tencent.tubemq.client.exception.TubeClientException;
 import com.tencent.tubemq.client.factory.MessageSessionFactory;
 import com.tencent.tubemq.client.factory.TubeSingleSessionFactory;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import com.tencent.tubemq.corebase.Message;
+import com.tencent.tubemq.corebase.utils.ThreadUtils;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-
+/**
+ * This demo shows how to consume message by pull.
+ *
+ * <p>Consume message in pull mode achieved by {@link PullMessageConsumer#getMessage()}.
+ * Note that whenever {@link PullMessageConsumer#getMessage()} returns successfully, the
+ * return value(whether or not to be {@code null}) should be processed by
+ * {@link PullMessageConsumer#confirmConsume(String, boolean)}.
+ */
 public final class MessagePullConsumerExample {
 
-    private static final Logger logger =
-            LoggerFactory.getLogger(MessagePullConsumerExample.class);
+    private static final Logger logger = LoggerFactory.getLogger(MessagePullConsumerExample.class);
     private static final MsgRecvStats msgRecvStats = new MsgRecvStats();
-    private final String masterHostAndPort;
-    private final String group;
-    private final String localHost;
-    private PullMessageConsumer messagePullConsumer;
-    private MessageSessionFactory messageSessionFactory;
 
-    public MessagePullConsumerExample(String localHost, String masterHostAndPort, String group) throws Exception {
-        this.masterHostAndPort = masterHostAndPort;
-        this.group = group;
-        this.localHost = localHost;
-        ConsumerConfig consumerConfig =
-                new ConsumerConfig(this.localHost, this.masterHostAndPort, this.group);
+    private final PullMessageConsumer messagePullConsumer;
+    private final MessageSessionFactory messageSessionFactory;
+
+    public MessagePullConsumerExample(
+        String localHost,
+        String masterHostAndPort,
+        String group
+    ) throws Exception {
+        ConsumerConfig consumerConfig = new ConsumerConfig(localHost, masterHostAndPort, group);
         consumerConfig.setConsumeModel(0);
         this.messageSessionFactory = new TubeSingleSessionFactory(consumerConfig);
         this.messagePullConsumer = messageSessionFactory.createPullConsumer(consumerConfig);
@@ -60,42 +63,42 @@ public final class MessagePullConsumerExample {
         final String localHost = args[0];
         final String masterHostAndPort = args[1];
         final String topics = args[2];
-        final List<String> topicList = Arrays.asList(topics.split(","));
-        final Thread statisticThread;
         final String group = args[3];
         final int consumeCount = Integer.parseInt(args[4]);
-        Thread[] fetchRunners;
-        fetchRunners = new Thread[3];
 
+        final MessagePullConsumerExample messageConsumer = new MessagePullConsumerExample(
+            localHost,
+            masterHostAndPort,
+            group);
 
-        final MessagePullConsumerExample messageConsumer
-                = new MessagePullConsumerExample(localHost, masterHostAndPort, group);
+        final List<String> topicList = Arrays.asList(topics.split(","));
         messageConsumer.subscribe(topicList);
         long startTime = System.currentTimeMillis();
 
+        Thread[] fetchRunners = new Thread[3];
         for (int i = 0; i < fetchRunners.length; i++) {
             fetchRunners[i] = new Thread(new FetchRequestRunner(messageConsumer, consumeCount));
             fetchRunners[i].setName("_fetch_runner_" + i);
         }
 
-
-        //等待客户端加入消费组分配实际消费的队列
+        // wait for client to join the exact consumer queue that consumer group allocated
         while (!messageConsumer.isCurConsumeReady(1000)) {
             ThreadUtils.sleep(1000);
         }
+
         logger.info("Wait and get partitions use time " + (System.currentTimeMillis() - startTime));
 
-        for (final Thread thread : fetchRunners) {
+        for (Thread thread : fetchRunners) {
             thread.start();
         }
 
-        statisticThread = new Thread(msgRecvStats, "Sent Statistic Thread");
+        Thread statisticThread = new Thread(msgRecvStats, "Sent Statistic Thread");
         statisticThread.start();
     }
 
     public void subscribe(List<String> topicList) throws TubeClientException {
         for (String topic : topicList) {
-            this.messagePullConsumer.subscribe(topic, null);
+            messagePullConsumer.subscribe(topic, null);
         }
 
         messagePullConsumer.completeSubscribe();
@@ -117,7 +120,7 @@ public final class MessagePullConsumerExample {
         return messagePullConsumer.getCurConsumedPartitions();
     }
 
-    static class FetchRequestRunner implements Runnable {
+    private static class FetchRequestRunner implements Runnable {
 
         final MessagePullConsumerExample messageConsumer;
         final int consumeCount;
@@ -134,7 +137,6 @@ public final class MessagePullConsumerExample {
                 do {
                     ConsumerResult result = messageConsumer.getMessage();
                     if (result.isSuccess()) {
-                        long currTime = System.currentTimeMillis();
                         List<Message> messageList = result.getMessageList();
                         if (messageList != null && !messageList.isEmpty()) {
                             msgRecvStats.addMsgCount(result.getTopicName(), messageList.size());
@@ -145,8 +147,10 @@ public final class MessagePullConsumerExample {
                             ThreadUtils.sleep(400);
                         } else {
                             if (result.getErrCode() != 404) {
-                                logger.info("Receive messages errorCode is "
-                                        + result.getErrCode() + ", Error message is " + result.getErrMsg());
+                                logger.info(
+                                    "Receive messages errorCode is {}, Error message is {}",
+                                    result.getErrCode(),
+                                    result.getErrMsg());
                             }
                         }
                     }

@@ -30,15 +30,28 @@ import com.tencent.tubemq.server.broker.msgstore.disk.GetMessageResult;
 import com.tencent.tubemq.server.broker.nodeinfo.ConsumerNodeInfo;
 import com.tencent.tubemq.server.broker.utils.DataStoreUtils;
 import com.tencent.tubemq.server.common.utils.FileUtil;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import java.io.*;
+import java.io.Closeable;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.util.*;
-import java.util.concurrent.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /***
  * Message on ssd storage management. It mainly store message on ssd, and copy to disk.
@@ -46,7 +59,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * Expired files will be delete when exceed storage quota.
  */
 public class MsgSSDStoreManager implements Closeable {
-    static final Logger logger = LoggerFactory.getLogger(MsgSSDStoreManager.class);
+    private static final Logger logger = LoggerFactory.getLogger(MsgSSDStoreManager.class);
     // file suffix
     private static final String DATA_FILE_SUFFIX = ".tube";
     // tube config
@@ -122,7 +135,7 @@ public class MsgSSDStoreManager implements Closeable {
             this.reqExecutor.execute(new SsdStoreRunner());
         } catch (final IOException e) {
             logger.error("[SSD Manager] load SSD data files failed", e);
-            throw new StartupException("Initilize SSD data files failed", e);
+            throw new StartupException("Initialize SSD data files failed", e);
         } catch (Throwable e) {
             Thread.currentThread().interrupt();
         }
@@ -403,7 +416,7 @@ public class MsgSSDStoreManager implements Closeable {
                     final String name = subDir.getName();
                     final int index = name.lastIndexOf('-');
                     if (index < 0) {
-                        logger.warn(strBuffer.append("[SSD Manager] Ignore invlaid directory:")
+                        logger.warn(strBuffer.append("[SSD Manager] Ignore invalid directory:")
                                 .append(subDir.getAbsolutePath()).toString());
                         strBuffer.delete(0, strBuffer.length());
                         continue;
@@ -505,10 +518,8 @@ public class MsgSSDStoreManager implements Closeable {
                 isSuccess = true;
                 isNew = true;
             } catch (FileNotFoundException e) {
-                e.printStackTrace();
                 logger.warn("[SSD Manager] copy File to SSD FileNotFoundException failure ", e);
             } catch (IOException e) {
-                e.printStackTrace();
                 logger.warn("[SSD Manager] copy File to SSD IOException failure ", e);
             } finally {
                 if (fosfrom != null) {
@@ -719,7 +730,7 @@ public class MsgSSDStoreManager implements Closeable {
                         }
                         final int index = ssdSegEvent.storeKey.lastIndexOf('-');
                         if (index < 0) {
-                            logger.warn(strBuffer.append("[SSD Manager] Ignore invlaid storeKey=")
+                            logger.warn(strBuffer.append("[SSD Manager] Ignore invalid storeKey=")
                                     .append(ssdSegEvent.storeKey).toString());
                             strBuffer.delete(0, strBuffer.length());
                             continue;

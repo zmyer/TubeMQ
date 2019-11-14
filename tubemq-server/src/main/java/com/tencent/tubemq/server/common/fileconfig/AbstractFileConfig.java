@@ -20,15 +20,14 @@ package com.tencent.tubemq.server.common.fileconfig;
 import com.tencent.tubemq.corebase.config.TLSConfig;
 import com.tencent.tubemq.corebase.utils.TStringUtils;
 import com.tencent.tubemq.server.broker.exception.StartupException;
+import java.io.File;
+import java.io.IOException;
+import java.util.Set;
 import org.apache.commons.io.FileUtils;
 import org.ini4j.Ini;
 import org.ini4j.Profile;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Set;
 
 
 public abstract class AbstractFileConfig {
@@ -36,11 +35,11 @@ public abstract class AbstractFileConfig {
     private static final Logger logger =
             LoggerFactory.getLogger(AbstractFileConfig.class);
 
-    protected String SECT_TOKEN_MASTER = "master";
-    protected String SECT_TOKEN_BROKER = "broker";
-    protected String SECT_TOKEN_BDB = "bdbStore";
-    protected String SECT_TOKEN_TLS = "tlsSetting";
-    protected String SECT_TOKEN_ZKEEPER = "zookeeper";
+    protected static final String SECT_TOKEN_MASTER = "master";
+    protected static final String SECT_TOKEN_BROKER = "broker";
+    protected static final String SECT_TOKEN_BDB = "bdbStore";
+    protected static final String SECT_TOKEN_TLS = "tlsSetting";
+    protected static final String SECT_TOKEN_ZKEEPER = "zookeeper";
 
     private String basePath;
     private String configPath;
@@ -120,14 +119,14 @@ public abstract class AbstractFileConfig {
     public int getInt(final Profile.Section section, final String key) {
         final String value = section.get(key);
         if (TStringUtils.isBlank(value)) {
-            throw new NullPointerException(new StringBuilder(256)
+            throw new IllegalArgumentException(new StringBuilder(256)
                     .append("Blank value for ").append(key).toString());
         } else {
             try {
                 final Long rt = Long.valueOf(value);
                 return rt.intValue();
             } catch (NumberFormatException e) {
-                throw new NullPointerException(new StringBuilder(256)
+                throw new IllegalArgumentException(new StringBuilder(256)
                         .append("Translate key(").append(key).append(")'s value ")
                         .append(value).append(" to int failure!").toString());
             }
@@ -144,13 +143,13 @@ public abstract class AbstractFileConfig {
     public boolean getBoolean(final Profile.Section section, final String key) {
         final String value = section.get(key);
         if (TStringUtils.isBlank(value)) {
-            throw new NullPointerException(new StringBuilder(256)
+            throw new IllegalArgumentException(new StringBuilder(256)
                     .append("Blank value for ").append(key).toString());
         } else {
             try {
                 return Boolean.valueOf(value);
             } catch (NumberFormatException e) {
-                throw new NullPointerException(new StringBuilder(256)
+                throw new IllegalArgumentException(new StringBuilder(256)
                         .append("Translate key(").append(key).append(")'s value ")
                         .append(value).append(" to boolean failure!").toString());
             }
@@ -167,13 +166,13 @@ public abstract class AbstractFileConfig {
     public long getLong(final Profile.Section section, final String key) {
         final String value = section.get(key);
         if (TStringUtils.isBlank(value)) {
-            throw new NullPointerException(new StringBuilder(256)
+            throw new IllegalArgumentException(new StringBuilder(256)
                     .append("Blank value for ").append(key).toString());
         } else {
             try {
                 return Long.valueOf(value);
             } catch (NumberFormatException e) {
-                throw new NullPointerException(new StringBuilder(256)
+                throw new IllegalArgumentException(new StringBuilder(256)
                         .append("Translate key(").append(key).append(")'s value ")
                         .append(value).append(" to long failure!").toString());
             }
@@ -248,12 +247,12 @@ public abstract class AbstractFileConfig {
     protected ZKConfig loadZKeeperSectConf(final Ini iniConf) {
         final Profile.Section zkeeperSect = iniConf.get(SECT_TOKEN_ZKEEPER);
         if (zkeeperSect == null) {
-            throw new NullPointerException(new StringBuilder(256)
+            throw new IllegalArgumentException(new StringBuilder(256)
                     .append(SECT_TOKEN_ZKEEPER).append(" configure section is required!").toString());
         }
         Set<String> configKeySet = zkeeperSect.keySet();
         if (configKeySet.isEmpty()) {
-            throw new NullPointerException(new StringBuilder(256)
+            throw new IllegalArgumentException(new StringBuilder(256)
                     .append("Empty configure item in ").append(SECT_TOKEN_ZKEEPER)
                     .append(" section!").toString());
         }

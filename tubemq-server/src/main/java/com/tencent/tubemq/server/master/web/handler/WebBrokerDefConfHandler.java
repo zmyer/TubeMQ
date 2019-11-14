@@ -17,6 +17,7 @@
 
 package com.tencent.tubemq.server.master.web.handler;
 
+import static java.lang.Math.abs;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.TokenConstants;
 import com.tencent.tubemq.corebase.cluster.BrokerInfo;
@@ -31,15 +32,17 @@ import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbTopicConfEntity;
 import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerConfManage;
 import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerInfoHolder;
 import com.tencent.tubemq.server.master.nodemanage.nodebroker.BrokerSyncStatusInfo;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import javax.servlet.http.HttpServletRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import javax.servlet.http.HttpServletRequest;
-import java.text.SimpleDateFormat;
-import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-
-import static java.lang.Math.abs;
 
 /**
  * Broker的缺省配置操作类,包括新增broker配置记录,变更配置,删除配置,以及修改broker的线上管理状态
@@ -52,7 +55,7 @@ import static java.lang.Math.abs;
  * - Delete config
  * And manage the broker status.
  * <p>
- * Please note that one IP could only host one broker, and borkerId must be unique
+ * Please note that one IP could only host one broker, and brokerId must be unique
  */
 public class WebBrokerDefConfHandler {
 
@@ -321,7 +324,7 @@ public class WebBrokerDefConfHandler {
             Date createDate =
                     WebParameterUtils.validDateParameter("createDate", req.getParameter("createDate"),
                             TBaseConstants.META_MAX_DATEVALUE_LENGTH, false, new Date());
-            List<LinkedHashMap<String, Object>> brokerJsonArray =
+            List<Map<String, Object>> brokerJsonArray =
                     WebParameterUtils.checkAndGetJsonArray("brokerJsonSet",
                             req.getParameter("brokerJsonSet"), TBaseConstants.META_VALUE_UNDEFINED, true);
             if ((brokerJsonArray == null) || (brokerJsonArray.isEmpty())) {
@@ -1499,7 +1502,7 @@ public class WebBrokerDefConfHandler {
             }
             strBuffer.append("],\"count\":").append(count).append("}");
         } catch (Exception e) {
-            logger.info(" adminQueryBrokerDefConfEntityInfo exception", e);
+            logger.error(" adminQueryBrokerDefConfEntityInfo exception", e);
             strBuffer.delete(0, strBuffer.length());
             strBuffer.append("{\"result\":false,\"errCode\":400,\"errMsg\":\"")
                     .append(e.getMessage()).append("\",\"count\":0,\"data\":[]}");

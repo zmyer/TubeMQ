@@ -19,7 +19,6 @@ package com.tencent.tubemq.server.master.web.simplemvc.conf;
 
 import com.tencent.tubemq.corebase.utils.TStringUtils;
 import com.tencent.tubemq.server.master.web.simplemvc.Action;
-
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -117,8 +116,8 @@ public class WebConfig {
         return types.contains(type);
     }
 
-    private void parseTypes(String typeParttern) {
-        String[] typeArr = typeParttern.split(",");
+    private void parseTypes(String typePattern) {
+        String[] typeArr = typePattern.split(",");
         types.clear();
         for (String type : typeArr) {
             types.add(type);

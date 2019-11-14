@@ -1,17 +1,35 @@
 # TubeMQ User Guide
+## Prerequisites
+
+- Java 1.7 or 1.8(Java 9 and above haven't been verified yet)
+- Maven
+- [protoc 2.5.0](https://github.com/protocolbuffers/protobuf/releases/tag/v2.5.0)
+
 ## Build
+
+### Build distribution tarball
 Go to the project root, and run
 ```bash
-mvn clean package -Dmaven.test.skip
+mvn clean package -DskipTests
 ```
-Each module of the project can also be build separately.
+If you want to build each module of the project separately, you need to run `mvn install` in the project root at first.
+### Build source code
+If you want to build and debug source code in IDE, go to the project root, and run
+
+```bash
+mvn compile
+```
+
+This command will generate the Java source files from the `protoc` files, the generated files located in `target/generated-sources`.
+
+When this command finished, you can use IDE import the project as maven project.
 
 ## Deploy
 After the build, please go to `tubemq-server/target`. You can find the
 **tubemq-server-x.x.x-bin.tar.gz** file. It is the server deployment package, which includes
 scripts, configuration files, dependency jars and web GUI code.
 
-In the first deployment, we just need to extract the package file. For example, we put these
+For the first time deployment, we just need to extract the package file. For example, we put these
 files into the `/opt/tubemq-server`, here's the folder structure.
 ```
 /opt/tubemq-server
@@ -24,7 +42,7 @@ files into the `/opt/tubemq-server`, here's the folder structure.
 ## Configure
 There're two roles in the cluster: **Master** and **Broker**. Master and Broker
 can be deployed on the same server or different servers. In this example, we setup our cluster
-like this, and all services run on the same node. Zookeeper should be setup in your environment.
+like this, and all services run on the same node. Zookeeper should be setup in your environment also.
 
 | Role | TCP Port | TLS Port | Web Port | Comment |
 | ---- | -------- | -------- | -------- | ------- |
@@ -32,7 +50,7 @@ like this, and all services run on the same node. Zookeeper should be setup in y
 | Broker | 8123 | 8124 | 8081 | Message is stored at /stage/msgdata |
 | Zookeeper | 2181 | | | Offset is stored at /tubemq |
 
-Based on the plan, update the corresponding config files. Please notice that the **YOUR_SERVER_IP** should
+You can follow the example below to update the corresponding config files. Please notice that the **YOUR_SERVER_IP** should
 be replaced with your server IP.
 
 ##### conf/master.ini
@@ -108,7 +126,7 @@ zkCommitFailRetries=10
 ```
 
 You also need to update your `/etc/hosts` file on the master servers. Add other master
-server IPs like this, say the ip is `192.168.1.2`:
+server IPs in this way, assume the ip is `192.168.1.2`:
 ##### /etc/hosts
 ```
 192.168.1.2 192-168-1-2
@@ -116,9 +134,9 @@ server IPs like this, say the ip is `192.168.1.2`:
 
 ## High Availability
 
-In the example, we run all the service on a single node. In the real production environment, you may
+In the example above, we run the services on a single node. However, in real production environment, you
 need to run multiple master services on different servers for high availability purpose. Here's
-the high availability level introduction.
+the introduction of availability level.
 
 | HA Level | Master Number | Description |
 | -------- | ------------- | ----------- |
@@ -129,7 +147,7 @@ the high availability level introduction.
 Please notice that the master servers should be clock synchronized.
 
 ## Start Master
-After updated the config file, please go to the `bin` folder and run this command to start
+After update the config file, please go to the `bin` folder and run this command to start
 the master service.
 ```bash
 ./master.sh start
@@ -152,7 +170,7 @@ In this example, we only need to input broker IP and authToken:
 2. authToken: A token pre-configured in the `conf/master.ini` file. Please check the
 `confModAuthToken` field in your `master.ini` file.
 
-Click the online link to active the new added broker.
+Click the online link to activate the new added broker.
 
 ![Add Broker 2](img/tubemq-add-broker-2.png)
 
@@ -211,7 +229,7 @@ Then we run the consume data demo. Also replace the server ip
 ```bash
 java -Xmx512m -Dlog4j.configuration=file:/opt/tubemq-server/conf/tools.log4j.properties -Djava.net.preferIPv4Stack=true -cp /opt/tubemq-server/lib/*:/opt/tubemq-server/conf/*: com.tencent.tubemq.example.MessageConsumerExample YOUR_SERVER_IP YOUR_SERVER_IP:8000 demo demoGroup 3 1 1
 ```
-From the log, we can see the message recieved by the consumer.
+From the log, we can see the message received by the consumer.
 
 ```bash
 [2019-09-11 16:09:29,720] INFO Receive messages:2500 (com.tencent.tubemq.example.MsgRecvStats)
@@ -219,3 +237,6 @@ From the log, we can see the message recieved by the consumer.
 [2019-09-11 16:09:34,493] INFO Receive messages:10000 (com.tencent.tubemq.example.MsgRecvStats)
 [2019-09-11 16:09:34,783] INFO Receive messages:12500 (com.tencent.tubemq.example.MsgRecvStats)
 ```
+
+---
+<a href="#top">Back to top</a>

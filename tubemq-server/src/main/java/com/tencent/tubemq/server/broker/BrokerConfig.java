@@ -17,6 +17,7 @@
 
 package com.tencent.tubemq.server.broker;
 
+import static java.lang.Math.abs;
 import com.tencent.tubemq.corebase.TBaseConstants;
 import com.tencent.tubemq.corebase.config.TLSConfig;
 import com.tencent.tubemq.corebase.utils.AddressUtils;
@@ -31,8 +32,6 @@ import org.ini4j.Ini;
 import org.ini4j.Profile.Section;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static java.lang.Math.abs;
 
 /***
  * Config of broker. Read from broker.ini config file.
@@ -74,16 +73,16 @@ public class BrokerConfig extends AbstractFileConfig {
     private int transferSize = 512 * 1024;
     // transfer index count
     private int indexTransCount = 1000;
-    // rpc read timeout in millseconds
+    // rpc read timeout in milliseconds
     private long rpcReadTimeoutMs = 10 * 1000;
     // max ssd file count
     private int maxSSDTotalFileCnt = 70;
     // max ssd file size
     private long maxSSDTotalFileSizes = 32212254720L;
-    // consumer register timeout in millseconds
+    // consumer register timeout in milliseconds
     private int consumerRegTimeoutMs = 30000;
     private boolean updateConsumerOffsets = true;
-    // heartbeat interval in millseconds
+    // heartbeat interval in milliseconds
     private long heartbeatPeriodMs = 8000L;
     // quartz thread count
     private int quartzThreadCount = 5;
@@ -91,11 +90,11 @@ public class BrokerConfig extends AbstractFileConfig {
     private long nettyWriteBufferHighWaterMark = 10 * 1024 * 1024;
     // netty write buffer low water mark
     private long nettyWriteBufferLowWaterMark = 5 * 1024 * 1024;
-    // log cleanup interval in millseconds
+    // log cleanup interval in milliseconds
     private long logClearupDurationMs = 30 * 60 * 1000;
-    // log flush to disk interval in millseconds
+    // log flush to disk interval in milliseconds
     private long logFlushDiskDurMs = 20 * 1000;
-    // memory flush to disk interval in millseconds
+    // memory flush to disk interval in milliseconds
     private long logFlushMemDurMs = 10 * 1000;
     // socket send buffer
     private long socketSendBuffer = -1;
@@ -208,30 +207,30 @@ public class BrokerConfig extends AbstractFileConfig {
         // #lizard forgives
         final Section brokerSect = iniConf.get(SECT_TOKEN_BROKER);
         if (brokerSect == null) {
-            throw new NullPointerException("Require broker section in configure file not Blank!");
+            throw new IllegalArgumentException("Require broker section in configure file not Blank!");
         }
         this.brokerId = this.getInt(brokerSect, "brokerId");
         this.port = this.getInt(brokerSect, "port", 8123);
         if (TStringUtils.isBlank(brokerSect.get("primaryPath"))) {
-            throw new NullPointerException("Require primaryPath not Blank!");
+            throw new IllegalArgumentException("Require primaryPath not Blank!");
         }
         this.primaryPath = brokerSect.get("primaryPath").trim();
         if (TStringUtils.isNotBlank(brokerSect.get("secondDataPath"))) {
             this.secondDataPath = brokerSect.get("secondDataPath");
         }
         if (TStringUtils.isBlank(brokerSect.get("hostName"))) {
-            throw new NullPointerException(new StringBuilder(256).append("hostName is null or Blank in ")
+            throw new IllegalArgumentException(new StringBuilder(256).append("hostName is null or Blank in ")
                     .append(SECT_TOKEN_BROKER).append(" section!").toString());
         }
         try {
             this.hostName = brokerSect.get("hostName").trim();
             AddressUtils.validLocalIp(this.hostName);
         } catch (Throwable e) {
-            throw new NullPointerException(new StringBuilder(256).append("Illegal hostName value in ")
+            throw new IllegalArgumentException(new StringBuilder(256).append("Illegal hostName value in ")
                     .append(SECT_TOKEN_BROKER).append(" section!").toString());
         }
         if (TStringUtils.isBlank(brokerSect.get("masterAddressList"))) {
-            throw new NullPointerException(new StringBuilder(256).append("masterAddressList is null or Blank in ")
+            throw new IllegalArgumentException(new StringBuilder(256).append("masterAddressList is null or Blank in ")
                     .append(SECT_TOKEN_BROKER).append(" section!").toString());
         }
         this.masterAddressList = brokerSect.get("masterAddressList");
@@ -339,11 +338,11 @@ public class BrokerConfig extends AbstractFileConfig {
         }
         if (this.visitMasterAuth) {
             if (TStringUtils.isBlank(brokerSect.get("visitName"))) {
-                throw new NullPointerException(new StringBuilder(256).append("visitName is null or Blank in ")
+                throw new IllegalArgumentException(new StringBuilder(256).append("visitName is null or Blank in ")
                         .append(SECT_TOKEN_BROKER).append(" section!").toString());
             }
             if (TStringUtils.isBlank(brokerSect.get("visitPassword"))) {
-                throw new NullPointerException(new StringBuilder(256)
+                throw new IllegalArgumentException(new StringBuilder(256)
                         .append("visitPassword is null or Blank in ").append(SECT_TOKEN_BROKER)
                         .append(" section!").toString());
             }

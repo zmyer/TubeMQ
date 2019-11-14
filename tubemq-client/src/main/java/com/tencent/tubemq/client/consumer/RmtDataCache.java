@@ -23,6 +23,21 @@ import com.tencent.tubemq.corebase.cluster.Partition;
 import com.tencent.tubemq.corebase.cluster.SubscribeInfo;
 import com.tencent.tubemq.corebase.policies.FlowCtrlRuleHandler;
 import com.tencent.tubemq.corebase.utils.ThreadUtils;
+import java.io.Closeable;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import org.jboss.netty.util.HashedWheelTimer;
 import org.jboss.netty.util.Timeout;
 import org.jboss.netty.util.Timer;
@@ -30,19 +45,11 @@ import org.jboss.netty.util.TimerTask;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
-
 /**
  * Remote data cache.
  */
 public class RmtDataCache implements Closeable {
-    static final Logger logger =
-            LoggerFactory.getLogger(RmtDataCache.class);
+    private static final Logger logger = LoggerFactory.getLogger(RmtDataCache.class);
     private static final AtomicLong refCont = new AtomicLong(0);
     private static Timer timer;
     private final FlowCtrlRuleHandler groupFlowCtrlRuleHandler;
@@ -165,7 +172,7 @@ public class RmtDataCache implements Closeable {
             if (hasPartitionWait()) {
                 return new PartitionSelectResult(false,
                         TErrCodeConstants.BAD_REQUEST,
-                        "All partiton in waiting, retry later!");
+                        "All partition in waiting, retry later!");
             } else {
                 return new PartitionSelectResult(false,
                         TErrCodeConstants.BAD_REQUEST,
@@ -185,7 +192,7 @@ public class RmtDataCache implements Closeable {
                 if (hasPartitionWait()) {
                     return new PartitionSelectResult(false,
                             TErrCodeConstants.BAD_REQUEST,
-                            "All partiton in waiting, retry later!");
+                            "All partition in waiting, retry later!");
                 } else {
                     return new PartitionSelectResult(false,
                             TErrCodeConstants.BAD_REQUEST,
@@ -242,10 +249,7 @@ public class RmtDataCache implements Closeable {
             if (this.isClosed.get()) {
                 return null;
             }
-            String key = indexPartition.poll();
-            if (key == null) {
-                return null;
-            }
+            String key = indexPartition.take();
             PartitionExt partitionExt = partitionMap.get(key);
             if (partitionExt == null) {
                 return null;
@@ -433,7 +437,7 @@ public class RmtDataCache implements Closeable {
                         lastPackConsumed = partitionExt.isLastPackConsumed();
                         if (!cancelTimeTask(partition.getPartitionKey())
                                 && !indexPartition.remove(partition.getPartitionKey())) {
-                            logger.info(sBuilder.append("[Process Interrupt] Partiton : ")
+                            logger.info(sBuilder.append("[Process Interrupt] Partition : ")
                                     .append(partition.toString())
                                     .append(", data in processing, canceled").toString());
                             sBuilder.delete(0, sBuilder.length());

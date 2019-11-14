@@ -18,7 +18,6 @@
 package com.tencent.tubemq.server.common.aaaserver;
 
 import com.tencent.tubemq.corebase.protobuf.generated.ClientMaster;
-
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -28,7 +27,8 @@ public interface CertificateMasterHandler {
 
     CertifiedResult identityValidBrokerInfo(final ClientMaster.MasterCertificateInfo authenticInfo);
 
-    CertifiedResult identityValidUserInfo(final ClientMaster.MasterCertificateInfo authenticInfo);
+    CertifiedResult identityValidUserInfo(final ClientMaster.MasterCertificateInfo authenticInfo,
+                                          boolean isProduce);
 
     CertifiedResult validProducerAuthorizeInfo(String userName, Set<String> topics, String clientIp);
 

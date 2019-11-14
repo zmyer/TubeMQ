@@ -21,7 +21,19 @@ import com.sleepycat.je.DatabaseException;
 import com.sleepycat.je.Durability;
 import com.sleepycat.je.EnvironmentConfig;
 import com.sleepycat.je.EnvironmentFailureException;
-import com.sleepycat.je.rep.*;
+import com.sleepycat.je.rep.InsufficientLogException;
+import com.sleepycat.je.rep.NetworkRestore;
+import com.sleepycat.je.rep.NetworkRestoreConfig;
+import com.sleepycat.je.rep.NodeState;
+import com.sleepycat.je.rep.ReplicatedEnvironment;
+import com.sleepycat.je.rep.ReplicationConfig;
+import com.sleepycat.je.rep.ReplicationGroup;
+import com.sleepycat.je.rep.ReplicationMutableConfig;
+import com.sleepycat.je.rep.ReplicationNode;
+import com.sleepycat.je.rep.StateChangeEvent;
+import com.sleepycat.je.rep.StateChangeListener;
+import com.sleepycat.je.rep.TimeConsistencyPolicy;
+import com.sleepycat.je.rep.UnknownMasterException;
 import com.sleepycat.je.rep.util.ReplicationGroupAdmin;
 import com.sleepycat.je.rep.utilint.ServiceDispatcher;
 import com.sleepycat.persist.EntityCursor;
@@ -34,13 +46,17 @@ import com.tencent.tubemq.server.Server;
 import com.tencent.tubemq.server.common.fileconfig.BDBConfig;
 import com.tencent.tubemq.server.master.MasterConfig;
 import com.tencent.tubemq.server.master.TMaster;
-import com.tencent.tubemq.server.master.bdbstore.bdbentitys.*;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbBlackGroupEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbBrokerConfEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbConsumeGroupSettingEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbConsumerGroupEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbGroupFilterCondEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbGroupFlowCtrlEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbTopicAuthControlEntity;
+import com.tencent.tubemq.server.master.bdbstore.bdbentitys.BdbTopicConfEntity;
 import com.tencent.tubemq.server.master.utils.BdbStoreSamplePrint;
 import com.tencent.tubemq.server.master.web.model.ClusterGroupVO;
 import com.tencent.tubemq.server.master.web.model.ClusterNodeVO;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -53,14 +69,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-
+/**
+ * Bdb store service
+ * like a local database manager, according to database table name, store instance, primary key, memory cache
+ * organize table structure
+ */
 public class DefaultBdbStoreService implements BdbStoreService, Server {
-    /**
-     * Bdb store service
-     * like a local database manager, according to database table name, store instance, primary key, memory cache
-     * organize table structure
-     */
     private static final Logger logger = LoggerFactory.getLogger(DefaultBdbStoreService.class);
 
     private static final String BDB_TOPIC_CONFIG_STORE_NAME = "bdbTopicConfig";
@@ -69,10 +86,9 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
     private static final String BDB_TOPIC_AUTHCONTROL_STORE_NAME = "bdbTopicAuthControl";
     private static final String BDB_BLACK_GROUP_STORE_NAME = "bdbBlackGroup";
     private static final String BDB_GROUP_FILTER_COND_STORE_NAME = "bdbGroupFilterCond";
-    private static final String BDB_DEFAULT_FLOW_CONTROL_STORE_NAME = "bdbDefaultFlowCtrlCfg";
     private static final String BDB_GROUP_FLOW_CONTROL_STORE_NAME = "bdbGroupFlowCtrlCfg";
     private static final String BDB_CONSUME_GROUP_SETTING_STORE_NAME = "bdbConsumeGroupSetting";
-    private static int REP_HANDLE_RETRY_MAX = 1;
+    private static final int REP_HANDLE_RETRY_MAX = 1;
     private final TMaster tMaster;
     // simple log print
     private final BdbStoreSamplePrint bdbStoreSamplePrint =
@@ -105,7 +121,7 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
             ConcurrentHashMap<String /* consumerGroup */, BdbConsumerGroupEntity>>
             consumerGroupTopicMap =
             new ConcurrentHashMap<String, ConcurrentHashMap<String, BdbConsumerGroupEntity>>();
-    // black consumer group list store
+    //consumer group black list store
     private EntityStore blackGroupStore;
     private PrimaryIndex<String/* recordKey */, BdbBlackGroupEntity> blackGroupIndex;
     private ConcurrentHashMap<
@@ -964,23 +980,21 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
                 consumeGroupSettingStore.getPrimaryIndex(String.class, BdbConsumeGroupSettingEntity.class);
     }
 
+    /**
+     * Initialize configuration for BDB-JE replication environment.
+     *
+     * */
     private void initEnvConfig() throws InterruptedException {
-    /*
-     * Set envHome and generate a ReplicationConfig. Note that ReplicationConfig and
-     * EnvironmentConfig values could all be specified in the je.properties file, as is shown in the
-     * properties file included in the example.
-     */
+
+        //Set envHome and generate a ReplicationConfig. Note that ReplicationConfig and
+        //EnvironmentConfig values could all be specified in the je.properties file, as is shown in the
+        //properties file included in the example.
         repConfig = new ReplicationConfig();
-    /* Set consistency policy for replica. */
-        TimeConsistencyPolicy consistencyPolicy = new TimeConsistencyPolicy(3, TimeUnit.SECONDS, /*
-                                                                                              * 3
-                                                                                              * sec
-                                                                                              * of
-                                                                                              * lag
-                                                                                              */
-                3, TimeUnit.SECONDS /* Wait up to 3 sec */);
+        // Set consistency policy for replica.
+        TimeConsistencyPolicy consistencyPolicy = new TimeConsistencyPolicy(3, TimeUnit.SECONDS,
+                3, TimeUnit.SECONDS);
         repConfig.setConsistencyPolicy(consistencyPolicy);
-    /* Wait up to 3 seconds for commitConsumed acknowledgments. */
+        // Wait up to 3 seconds for commitConsumed acknowledgments.
         repConfig.setReplicaAckTimeout(3, TimeUnit.SECONDS);
         repConfig.setConfigParam(ReplicationConfig.TXN_ROLLBACK_LIMIT, "1000");
         repConfig.setGroupName(bdbConfig.getBdbRepGroupName());
@@ -992,12 +1006,10 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
             repConfig.setHelperHosts(bdbConfig.getBdbHelperHost());
         }
 
-    /*
-     * A replicated environment must be opened with transactions enabled. Environments on a master
-     * must be read/write, while environments on a client can be read/write or read/only. Since the
-     * master's identity may change, it's most convenient to open the environment in the default
-     * read/write mode. All write operations will be refused on the client though.
-     */
+        //A replicated environment must be opened with transactions enabled. Environments on a master
+        //must be read/write, while environments on a client can be read/write or read/only. Since the
+        //master's identity may change, it's most convenient to open the environment in the default
+        //read/write mode. All write operations will be refused on the client though.
         envConfig = new EnvironmentConfig();
         envConfig.setTransactional(true);
         Durability durability =
@@ -1006,13 +1018,11 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         envConfig.setDurability(durability);
         envConfig.setAllowCreate(true);
 
-        // seqConfig.setCacheSize(1);
-        // seqConfig.setAllowCreate(true);
-
         envHome = new File(bdbConfig.getBdbEnvHome());
-    /* An Entity Store in a replicated environment must be transactional. */
+
+        // An Entity Store in a replicated environment must be transactional.
         storeConfig.setTransactional(true);
-    /* Note that both Master and Replica open the store for write. */
+        // Note that both Master and Replica open the store for write.
         storeConfig.setReadOnly(false);
         storeConfig.setAllowCreate(true);
     }
@@ -1027,44 +1037,39 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
      */
     private ReplicatedEnvironment getEnvironment(File envHome) throws InterruptedException {
         DatabaseException exception = null;
-    /*
-     * In this example we retry REP_HANDLE_RETRY_MAX times, but a production HA application may
-     * retry indefinitely.
-     */
+
+        //In this example we retry REP_HANDLE_RETRY_MAX times, but a production HA application may
+        //retry indefinitely.
         for (int i = 0; i < REP_HANDLE_RETRY_MAX; i++) {
             try {
                 return new ReplicatedEnvironment(envHome, repConfig, envConfig);
-
             } catch (UnknownMasterException unknownMaster) {
                 exception = unknownMaster;
-        /*
-         * Indicates there is a group level problem: insufficient nodes for an election, network
-         * connectivity issues, etc. Wait and retry to allow the problem to be resolved.
-         */
+                //Indicates there is a group level problem: insufficient nodes for an election, network
+                //connectivity issues, etc. Wait and retry to allow the problem to be resolved.
                 logger.error("Master could not be established. " + "Exception message:"
                         + unknownMaster.getMessage() + " Will retry after 5 seconds.");
                 Thread.sleep(5 * 1000);
-
                 continue;
             } catch (InsufficientLogException insufficientLogEx) {
-                logger.info("[Restoring data please wait....] " +
+                logger.error("[Restoring data please wait....] " +
                         "Obtains logger files for a Replica from other members of the replication group. " +
                         "A Replica may need to do so if it has been offline for some time, " +
                         "and has fallen behind in its execution of the replication stream.");
                 NetworkRestore restore = new NetworkRestore();
                 NetworkRestoreConfig config = new NetworkRestoreConfig();
-                config.setRetainLogFiles(false); // delete obsolete logger files.
+                // delete obsolete logger files.
+                config.setRetainLogFiles(false);
                 restore.execute(insufficientLogEx, config);
-
                 // retry
                 return new ReplicatedEnvironment(envHome, repConfig, envConfig);
             }
         }
-    /* Failed despite retries. */
+        // Failed despite retries.
         if (exception != null) {
             throw exception;
         }
-    /* Don't expect to get here. */
+        // Don't expect to get here.
         throw new IllegalStateException("Failed despite retries");
     }
 
@@ -1081,48 +1086,30 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = brokerConfIndex.entities();
             brokerConfigMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadBrokerConfUnits] Load broker default configure start:");
-                for (BdbBrokerConfEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from brokerConfIndex!");
-                        continue;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadBrokerConfUnits] Load broker default configure start:");
+            for (BdbBrokerConfEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from brokerConfIndex!");
+                    continue;
+                }
+                BdbBrokerConfEntity tmpbdbEntity = brokerConfigMap.get(bdbEntity.getBrokerId());
+                if (tmpbdbEntity == null) {
+                    brokerConfigMap.put(bdbEntity.getBrokerId(), bdbEntity);
+                    if (tMaster != null && tMaster.getMasterTopicManage() != null) {
+                        tMaster.getMasterTopicManage().updateBrokerMaps(bdbEntity);
                     }
-                    BdbBrokerConfEntity tmpbdbEntity = brokerConfigMap.get(bdbEntity.getBrokerId());
-                    if (tmpbdbEntity == null) {
-                        brokerConfigMap.put(bdbEntity.getBrokerId(), bdbEntity);
-                        if (tMaster != null && tMaster.getMasterTopicManage() != null) {
-                            tMaster.getMasterTopicManage().updateBrokerMaps(bdbEntity);
-                        }
-                    }
-                    count++;
+                }
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadBrokerConfUnits] Load broker default configure finished.");
-
-            } else {
-                for (BdbBrokerConfEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn(
-                                "[BDB Error] Found Null data while loading from brokerConfIndex!");
-                        continue;
-                    }
-                    BdbBrokerConfEntity tmpbdbEntity = brokerConfigMap.get(bdbEntity.getBrokerId());
-                    if (tmpbdbEntity == null) {
-                        brokerConfigMap.put(bdbEntity.getBrokerId(), bdbEntity);
-                        if (tMaster != null && tMaster.getMasterTopicManage() != null) {
-                            tMaster.getMasterTopicManage().updateBrokerMaps(bdbEntity);
-                        }
-                    }
-                    count++;
-                }
             }
-            logger.info("[loadBrokerConfUnits] total load records are " + count);
+            logger.debug("[loadBrokerConfUnits] Load broker default configure finished.");
+            logger.info("[loadBrokerConfUnits] total load records are {} ", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadBrokerConfUnits error] ", e);
+            logger.error("[loadBrokerConfUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1139,48 +1126,30 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = topicConfIndex.entities();
             brokerIdTopicEntityMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[Load topic config] load broker topic record start:");
-                for (BdbTopicConfEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from topicConfIndex!");
-                        continue;
-                    }
-                    ConcurrentHashMap<String/* topicName */, BdbTopicConfEntity> brokerTopicMap =
-                            brokerIdTopicEntityMap.get(bdbEntity.getBrokerId());
-                    if (brokerTopicMap == null) {
-                        brokerTopicMap =
-                                new ConcurrentHashMap<String, BdbTopicConfEntity>();
-                        brokerIdTopicEntityMap.put(bdbEntity.getBrokerId(), brokerTopicMap);
-                    }
-                    brokerTopicMap.put(bdbEntity.getTopicName(), bdbEntity);
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            for (BdbTopicConfEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from topicConfIndex!");
+                    continue;
+                }
+                ConcurrentHashMap<String/* topicName */, BdbTopicConfEntity> brokerTopicMap =
+                        brokerIdTopicEntityMap.get(bdbEntity.getBrokerId());
+                if (brokerTopicMap == null) {
+                    brokerTopicMap =
+                            new ConcurrentHashMap<String, BdbTopicConfEntity>();
+                    brokerIdTopicEntityMap.put(bdbEntity.getBrokerId(), brokerTopicMap);
+                }
+                brokerTopicMap.put(bdbEntity.getTopicName(), bdbEntity);
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[Load topic config] load broker topic record finished!");
-            } else {
-                for (BdbTopicConfEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from topicConfIndex!");
-                        continue;
-                    }
-                    ConcurrentHashMap<String/* topicName */, BdbTopicConfEntity> brokerTopicMap =
-                            brokerIdTopicEntityMap.get(bdbEntity.getBrokerId());
-                    if (brokerTopicMap == null) {
-                        brokerTopicMap =
-                                new ConcurrentHashMap<String, BdbTopicConfEntity>();
-                        brokerIdTopicEntityMap.put(bdbEntity.getBrokerId(), brokerTopicMap);
-                    }
-                    brokerTopicMap.put(bdbEntity.getTopicName(), bdbEntity);
-                    count++;
-                }
             }
-            logger.info("[loadTopicConfUnits] total load records is " + count);
+            logger.debug("[Load topic config] load broker topic record finished!");
+            logger.info("[loadTopicConfUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadTopicConfUnits error] ", e);
+            logger.error("[loadTopicConfUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1197,52 +1166,33 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = consumerGroupIndex.entities();
             consumerGroupTopicMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadConsumerGroupUnits] Load consumer group begin:");
-                for (BdbConsumerGroupEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from consumerGroupIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getGroupTopicName();
-                    String consumerGroupName = bdbEntity.getConsumerGroupName();
-                    ConcurrentHashMap<String/* groupName */, BdbConsumerGroupEntity> consumerGroupMap =
-                            consumerGroupTopicMap.get(topicName);
-                    if (consumerGroupMap == null) {
-                        consumerGroupMap =
-                                new ConcurrentHashMap<String, BdbConsumerGroupEntity>();
-                        consumerGroupTopicMap.put(topicName, consumerGroupMap);
-                    }
-                    consumerGroupMap.put(consumerGroupName, bdbEntity);
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadConsumerGroupUnits] Load consumer group begin:");
+            for (BdbConsumerGroupEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from consumerGroupIndex!");
+                    continue;
+                }
+                String topicName = bdbEntity.getGroupTopicName();
+                String consumerGroupName = bdbEntity.getConsumerGroupName();
+                ConcurrentHashMap<String/* groupName */, BdbConsumerGroupEntity> consumerGroupMap =
+                        consumerGroupTopicMap.get(topicName);
+                if (consumerGroupMap == null) {
+                    consumerGroupMap =
+                            new ConcurrentHashMap<String, BdbConsumerGroupEntity>();
+                    consumerGroupTopicMap.put(topicName, consumerGroupMap);
+                }
+                consumerGroupMap.put(consumerGroupName, bdbEntity);
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadConsumerGroupUnits] Load consumer group finished!");
-            } else {
-                for (BdbConsumerGroupEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from consumerGroupIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getGroupTopicName();
-                    String consumerGroupName = bdbEntity.getConsumerGroupName();
-                    ConcurrentHashMap<String/* groupName */, BdbConsumerGroupEntity> consumerGroupMap =
-                            consumerGroupTopicMap.get(topicName);
-                    if (consumerGroupMap == null) {
-                        consumerGroupMap =
-                                new ConcurrentHashMap<String, BdbConsumerGroupEntity>();
-                        consumerGroupTopicMap.put(topicName, consumerGroupMap);
-                    }
-                    consumerGroupMap.put(consumerGroupName, bdbEntity);
-                    count++;
-                }
             }
-            logger.info("[loadConsumerGroupUnits] total load records is " + count);
+            logger.debug("[loadConsumerGroupUnits] Load consumer group finished!");
+            logger.info("[loadConsumerGroupUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadConsumerGroupUnits error] ", e);
+            logger.error("[loadConsumerGroupUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1259,52 +1209,33 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = groupFilterCondIndex.entities();
             groupFilterCondMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadGroupFilterCondUnits] Load consumer group start:");
-                for (BdbGroupFilterCondEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from groupFilterCondIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getTopicName();
-                    String consumerGroupName = bdbEntity.getConsumerGroupName();
-                    ConcurrentHashMap<String, BdbGroupFilterCondEntity> filterCondMap =
-                            groupFilterCondMap.get(topicName);
-                    if (filterCondMap == null) {
-                        filterCondMap =
-                                new ConcurrentHashMap<String, BdbGroupFilterCondEntity>();
-                        groupFilterCondMap.put(topicName, filterCondMap);
-                    }
-                    filterCondMap.put(consumerGroupName, bdbEntity);
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadGroupFilterCondUnits] Load consumer group start:");
+            for (BdbGroupFilterCondEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from groupFilterCondIndex!");
+                    continue;
+                }
+                String topicName = bdbEntity.getTopicName();
+                String consumerGroupName = bdbEntity.getConsumerGroupName();
+                ConcurrentHashMap<String, BdbGroupFilterCondEntity> filterCondMap =
+                        groupFilterCondMap.get(topicName);
+                if (filterCondMap == null) {
+                    filterCondMap =
+                            new ConcurrentHashMap<String, BdbGroupFilterCondEntity>();
+                    groupFilterCondMap.put(topicName, filterCondMap);
+                }
+                filterCondMap.put(consumerGroupName, bdbEntity);
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadGroupFilterCondUnits] Load consumer group finished!");
-            } else {
-                for (BdbGroupFilterCondEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from groupFilterCondIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getTopicName();
-                    String consumerGroupName = bdbEntity.getConsumerGroupName();
-                    ConcurrentHashMap<String, BdbGroupFilterCondEntity> filterCondMap =
-                            groupFilterCondMap.get(topicName);
-                    if (filterCondMap == null) {
-                        filterCondMap =
-                                new ConcurrentHashMap<String, BdbGroupFilterCondEntity>();
-                        groupFilterCondMap.put(topicName, filterCondMap);
-                    }
-                    filterCondMap.put(consumerGroupName, bdbEntity);
-                    count++;
-                }
             }
-            logger.info("[loadGroupFilterCondUnits] total load records is " + count);
+            logger.debug("[loadGroupFilterCondUnits] Load consumer group finished!");
+            logger.info("[loadGroupFilterCondUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadGroupFilterCondUnits error] ", e);
+            logger.error("[loadGroupFilterCondUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1321,36 +1252,25 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = groupFlowCtrlIndex.entities();
             groupFlowCtrlMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadGroupFlowCtrlUnits] Load consumer group start:");
-                for (BdbGroupFlowCtrlEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from groupFilterCondIndex!");
-                        continue;
-                    }
-                    String groupName = bdbEntity.getGroupName();
-                    groupFlowCtrlMap.put(groupName, bdbEntity);
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadGroupFlowCtrlUnits] Load consumer group start:");
+            for (BdbGroupFlowCtrlEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from groupFilterCondIndex!");
+                    continue;
+                }
+                String groupName = bdbEntity.getGroupName();
+                groupFlowCtrlMap.put(groupName, bdbEntity);
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadGroupFlowCtrlUnits] Load consumer group finished!");
-            } else {
-                for (BdbGroupFlowCtrlEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from groupFilterCondIndex!");
-                        continue;
-                    }
-                    String groupName = bdbEntity.getGroupName();
-                    groupFlowCtrlMap.put(groupName, bdbEntity);
-                    count++;
-                }
             }
-            logger.info("[loadGroupFlowCtrlUnits] total load records is " + count);
+            logger.debug("[loadGroupFlowCtrlUnits] Load consumer group finished!");
+            logger.info("[loadGroupFlowCtrlUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadGroupFlowCtrlUnits error] ", e);
+            logger.error("[loadGroupFlowCtrlUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1367,52 +1287,33 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = blackGroupIndex.entities();
             blackGroupTopicMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadBlackGroupUnits] Load consumer group start:");
-                for (BdbBlackGroupEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from blackGroupIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getTopicName();
-                    String consumerGroupName = bdbEntity.getBlackGroupName();
-                    ConcurrentHashMap<String/* topicName */, BdbBlackGroupEntity> blackGroupMap =
-                            blackGroupTopicMap.get(consumerGroupName);
-                    if (blackGroupMap == null) {
-                        blackGroupMap =
-                                new ConcurrentHashMap<String, BdbBlackGroupEntity>();
-                        blackGroupTopicMap.put(consumerGroupName, blackGroupMap);
-                    }
-                    blackGroupMap.put(topicName, bdbEntity);
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadBlackGroupUnits] Load consumer group start:");
+            for (BdbBlackGroupEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from blackGroupIndex!");
+                    continue;
+                }
+                String topicName = bdbEntity.getTopicName();
+                String consumerGroupName = bdbEntity.getBlackGroupName();
+                ConcurrentHashMap<String/* topicName */, BdbBlackGroupEntity> blackGroupMap =
+                        blackGroupTopicMap.get(consumerGroupName);
+                if (blackGroupMap == null) {
+                    blackGroupMap =
+                            new ConcurrentHashMap<String, BdbBlackGroupEntity>();
+                    blackGroupTopicMap.put(consumerGroupName, blackGroupMap);
+                }
+                blackGroupMap.put(topicName, bdbEntity);
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadBlackGroupUnits] Load consumer group finished!");
-            } else {
-                for (BdbBlackGroupEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from blackGroupIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getTopicName();
-                    String consumerGroupName = bdbEntity.getBlackGroupName();
-                    ConcurrentHashMap<String/* topicName */, BdbBlackGroupEntity> blackGroupMap =
-                            blackGroupTopicMap.get(consumerGroupName);
-                    if (blackGroupMap == null) {
-                        blackGroupMap =
-                                new ConcurrentHashMap<String, BdbBlackGroupEntity>();
-                        blackGroupTopicMap.put(consumerGroupName, blackGroupMap);
-                    }
-                    blackGroupMap.put(topicName, bdbEntity);
-                    count++;
-                }
             }
-            logger.info("[loadBlackGroupUnits] total load records is " + count);
+            logger.debug("[loadBlackGroupUnits] Load consumer group finished!");
+            logger.info("[loadBlackGroupUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadBlackGroupUnits error] ", e);
+            logger.error("[loadBlackGroupUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1429,42 +1330,28 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = topicAuthControlIndex.entities();
             topicAuthControlMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadTopicAuthControlUnits] Load topic authorized control start:");
-                for (BdbTopicAuthControlEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from topicAuthControlIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getTopicName();
-                    BdbTopicAuthControlEntity tmpbdbEntity = topicAuthControlMap.get(topicName);
-                    if (tmpbdbEntity == null) {
-                        topicAuthControlMap.put(topicName, bdbEntity);
-                    }
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadTopicAuthControlUnits] Load topic authorized control start:");
+            for (BdbTopicAuthControlEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from topicAuthControlIndex!");
+                    continue;
+                }
+                String topicName = bdbEntity.getTopicName();
+                BdbTopicAuthControlEntity tmpbdbEntity = topicAuthControlMap.get(topicName);
+                if (tmpbdbEntity == null) {
+                    topicAuthControlMap.put(topicName, bdbEntity);
+                }
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadTopicAuthControlUnits] Load topic authorized control finished!");
-            } else {
-                for (BdbTopicAuthControlEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from topicAuthControlIndex!");
-                        continue;
-                    }
-                    String topicName = bdbEntity.getTopicName();
-                    BdbTopicAuthControlEntity tmpbdbEntity = topicAuthControlMap.get(topicName);
-                    if (tmpbdbEntity == null) {
-                        topicAuthControlMap.put(topicName, bdbEntity);
-                    }
-                    count++;
-                }
             }
-            logger.info("[loadTopicAuthControlUnits] total load records is " + count);
+            logger.debug("[loadTopicAuthControlUnits] Load topic authorized control finished!");
+            logger.info("[loadTopicAuthControlUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadTopicAuthControlUnits error] ", e);
+            logger.error("[loadTopicAuthControlUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1481,34 +1368,24 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
         try {
             cursor = consumeGroupSettingIndex.entities();
             consumeGroupSettingMap.clear();
-            if (logger.isDebugEnabled()) {
-                StringBuilder sBuilder = new StringBuilder(512);
-                logger.debug("[loadConsumeGroupSettingUnits] Load consumer group begin:");
-                for (BdbConsumeGroupSettingEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from offsetResetGroupIndex!");
-                        continue;
-                    }
-                    consumeGroupSettingMap.put(bdbEntity.getConsumeGroupName(), bdbEntity);
-                    count++;
+            StringBuilder sBuilder = logger.isDebugEnabled() ? new StringBuilder(512) : null;
+            logger.debug("[loadConsumeGroupSettingUnits] Load consumer group begin:");
+            for (BdbConsumeGroupSettingEntity bdbEntity : cursor) {
+                if (bdbEntity == null) {
+                    logger.warn("[BDB Error] Found Null data while loading from offsetResetGroupIndex!");
+                    continue;
+                }
+                consumeGroupSettingMap.put(bdbEntity.getConsumeGroupName(), bdbEntity);
+                count++;
+                if (logger.isDebugEnabled()) {
                     logger.debug(bdbEntity.toJsonString(sBuilder).toString());
                     sBuilder.delete(0, sBuilder.length());
                 }
-                logger.debug("[loadConsumeGroupSettingUnits] Load consumer group finished!");
-            } else {
-                for (BdbConsumeGroupSettingEntity bdbEntity : cursor) {
-                    if (bdbEntity == null) {
-                        logger.warn("[BDB Error] Found Null data while loading from offsetResetGroupIndex!");
-                        continue;
-                    }
-                    consumeGroupSettingMap.put(bdbEntity.getConsumeGroupName(), bdbEntity);
-                    count++;
-                }
             }
-            logger.info("[loadConsumeGroupSettingUnits] total load records is " + count);
+            logger.debug("[loadConsumeGroupSettingUnits] Load consumer group finished!");
+            logger.info("[loadConsumeGroupSettingUnits] total load records are {}", count);
         } catch (Exception e) {
-            e.printStackTrace();
-            logger.info("[loadConsumeGroupSettingUnits error] ", e);
+            logger.error("[loadConsumeGroupSettingUnits error] ", e);
             throw e;
         } finally {
             if (cursor != null) {
@@ -1577,7 +1454,7 @@ public class DefaultBdbStoreService implements BdbStoreService, Server {
                         default:
                             isMaster = false;
                             logger.info(sBuilder.append("[BDB Status] ")
-                                    .append(currentNode).append(" is state ")
+                                    .append(currentNode).append(" is Unknown state ")
                                     .append(stateChangeEvent.getState().name()).toString());
                             break;
                     }
